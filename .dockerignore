@@ -1,0 +1,10 @@
+.git
+.gitpublic
+node_modules
+dist
+.cache
+.env
+.env.*
+!.env.example
+proxy/.codex-backup-*/
+AGENTS_deploy.md

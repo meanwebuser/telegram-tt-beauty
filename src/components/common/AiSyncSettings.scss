@@ -1,0 +1,11 @@
+.ai-sync-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ai-sync-settings__hint {
+  margin: 0;
+  color: var(--color-text-meta);
+  font-size: 0.8125rem;
+}

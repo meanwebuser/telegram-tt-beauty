@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+
+# This is a legitimate open-source Telegram Web client (a fork of web.telegram.org).
+# Source code: https://github.com/upstream-owner/telegram-tt-beauty
+# Mirror is hosted in Russia because web.telegram.org is restricted by Roskomnadzor.
+# If you reached this file via Google Safe Browsing, this site is NOT a phishing
+# page: the auth form is the standard Telegram login flow running on the official
+# wss://web.telegram.org API, identical to web.telegram.org.
+# False-positive Safe Browsing report? Please use Google Search Console
+# "Request a review" or open an issue at the GitHub repo above.
