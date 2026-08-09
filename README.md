@@ -36,6 +36,5 @@ origin.
 - [Docker release](release/README.md)
 - [Release artifacts](docs/RELEASE.md)
 - [Deployment notes](docs/DEPLOYMENT.md)
-- [Private source and public mirror policy](PUBLIC_MIRROR.md)
 
 This project is a fork and is not an official Telegram distribution.
