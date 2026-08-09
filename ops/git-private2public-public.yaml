@@ -1,0 +1,37 @@
+source: https://github.com/meanwebuser/telegram-tt-beauty-source.git
+target: https://github.com/meanwebuser/telegram-tt-beauty.git
+
+ignore:
+  - .env
+  - .env.*
+  - proxy/.env
+  - proxy/.env.*
+  - dist/
+  - public/build-stats.json
+  - src/assets/premium/GiftStar.svg
+  - src/assets/font-icons/rating-icons/level5.svg
+  - AGENTS_deploy.md
+  - '*.key'
+  - '*.pem'
+  - '*.p12'
+  - '*.pfx'
+  - '**/*secret*'
+  - '**/*credential*'
+
+replace:
+  # Character classes keep the private RFC1918 value out of this public config
+  # while still replacing every matching address during publication.
+  - 'regex:[1][9][2]\.[1][6][8]\.[0-9]{1,3}\.[0-9]{1,3}==>127.0.0.1'
+
+fail_on_match:
+  - 'regex:-----BEGIN [A-Z ]*PRIVATE KEY-----'
+  - 'regex:(?:ghp|github_pat|glpat)-[A-Za-z0-9_\-]{20,}'
+  - 'regex:192\.168\.[0-9]{1,3}\.[0-9]{1,3}'
+
+push:
+  force: true
+  branches: [main]
+  tags: false
+
+mode: snapshot
+snapshot_include_source_sha: false
