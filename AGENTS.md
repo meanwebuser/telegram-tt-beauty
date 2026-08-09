@@ -591,3 +591,19 @@ PWA: Support system sharing menu
 [iOS] Startup: Add logs and signposts
 [Refactoring] Fix @typescript-eslint/await-thenable errors
 ```
+
+# Public mirror workflow
+
+This repository is the sanitized public mirror. The canonical private source
+is `https://github.com/meanwebuser/telegram-tt-beauty-source`.
+
+- Make changes only in the private source.
+- Do not add this public repository as a working remote.
+- Do not push directly to `main`.
+- Publish only with `git-private2public scan -c ops/git-private2public-public.yaml`
+  followed by `git-private2public publish -c ops/git-private2public-public.yaml`.
+- A failed scan is a hard stop; never bypass the guard or branch protection.
+- Keep credentials, sessions, private keys, internal addresses/domains, and
+  deployment-only material out of this repository.
+
+See [PUBLIC_MIRROR.md](PUBLIC_MIRROR.md) for the complete sync procedure.
