@@ -26,7 +26,7 @@ import {
   TimedOutError,
   UserMigrateError,
 } from '../errors';
-import { Logger } from '../extensions';
+import { Logger, setTelegramProxyOverride } from '../extensions';
 import {
   ConnectionTCPObfuscated,
   HttpConnection,
@@ -77,6 +77,7 @@ type TelegramClientParams = {
   shouldAllowHttpTransport: boolean;
   shouldForceHttpTransport: boolean;
   shouldDebugExportedSenders: boolean;
+  shouldUseTelegramProxy?: boolean;
 };
 
 type TimeoutId = number;
@@ -146,6 +147,7 @@ class TelegramClient {
     shouldAllowHttpTransport: false,
     shouldForceHttpTransport: false,
     shouldDebugExportedSenders: false,
+    shouldUseTelegramProxy: undefined,
   };
 
   private _args: TelegramClientParams;
@@ -226,6 +228,7 @@ class TelegramClient {
     this._shouldForceHttpTransport = args.shouldForceHttpTransport;
     this._shouldAllowHttpTransport = args.shouldAllowHttpTransport;
     this._shouldDebugExportedSenders = args.shouldDebugExportedSenders;
+    setTelegramProxyOverride(args.shouldUseTelegramProxy);
     // this._entityCache = new Set()
     if (typeof args.baseLogger === 'string') {
       this._log = new Logger();
@@ -379,6 +382,13 @@ class TelegramClient {
 
   async setAllowHttpTransport(allowHttpTransport: boolean) {
     this._shouldAllowHttpTransport = allowHttpTransport;
+    this.disconnect();
+    this._sender = undefined;
+    await this.connect();
+  }
+
+  async setShouldUseTelegramProxy(shouldUseTelegramProxy: boolean | undefined) {
+    setTelegramProxyOverride(shouldUseTelegramProxy);
     this.disconnect();
     this._sender = undefined;
     await this.connect();

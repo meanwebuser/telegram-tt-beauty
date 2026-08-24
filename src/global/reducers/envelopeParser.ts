@@ -8,8 +8,14 @@
  */
 
 import type { ApiMessage } from '../../api/types';
+import { TELEGRAM_TOOL_NAMES } from '../../mcp/telegramTools';
 import type {
+  AiAssistantResponseRecord,
   AiMessageRecord,
+  AiSessionMetadataRecord,
+  AiToolCallRecord,
+  AiToolResultRecord,
+  AiUserPromptRecord,
 } from '../types/envelopeRecords';
 import {
   ENVELOPE_FIELD_SEPARATOR, ENVELOPE_MAX_PAYLOAD_BYTES, ENVELOPE_PREFIX,
@@ -211,6 +217,7 @@ function parseToolCall(message: ApiMessage, raw: Record<string, unknown>): AiToo
   const toolName = requireString(raw.toolName, 'toolName');
   const argumentsRaw = raw.arguments === undefined ? '' : (raw.arguments as string);
   if (!callId || !toolName || typeof argumentsRaw !== 'string') return undefined;
+  if (!TELEGRAM_TOOL_NAMES.includes(toolName as (typeof TELEGRAM_TOOL_NAMES)[number])) return undefined;
   if (argumentsRaw.length > ENVELOPE_MAX_PAYLOAD_BYTES) return undefined;
 
   return {

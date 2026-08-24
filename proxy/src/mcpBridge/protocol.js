@@ -43,11 +43,16 @@ function ensureString(value, label) {
   }
 }
 
-function ensureNoTelegramSecrets(payload) {
-  for (const key of Object.keys(payload)) {
-    if (TELEGRAM_SECRET_KEYS.has(key)) {
+export function ensureNoTelegramSecrets(payload, seen = new WeakSet(), allowErrorCode = false) {
+  if (!payload || typeof payload !== 'object' || seen.has(payload)) return;
+  seen.add(payload);
+  for (const [key, value] of Object.entries(payload)) {
+    if (TELEGRAM_SECRET_KEYS.has(key) && !(allowErrorCode && key === 'code')) {
       throw new Error(`telegram session material is not accepted on the proxy: ${key}`);
     }
+    // Only the immediate protocol error object may use `code`; nested codes
+    // can contain Telegram verification codes and must remain rejected.
+    ensureNoTelegramSecrets(value, seen);
   }
 }
 
@@ -75,6 +80,7 @@ function cloneConnection(record) {
     transport: { ...record.transport },
     browserConnectionId: record.browserConnectionId,
     bearerHash: record.bearerHash,
+    allowWrite: record.allowWrite,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     revokedAt: record.revokedAt,
@@ -107,6 +113,9 @@ export function createBridgeHub({
       ensureObject(input, 'connection');
       ensureNoTelegramSecrets(input);
       ensureString(input.userId, 'userId');
+      if (input.allowWrite !== undefined && typeof input.allowWrite !== 'boolean') {
+        throw new TypeError('allowWrite must be a boolean');
+      }
 
       const providedBearerHash = input.bearerHash;
       const providedBearer = input.bearer;
@@ -133,6 +142,7 @@ export function createBridgeHub({
         userId: input.userId,
         status: 'disabled',
         transport: { mode: 'browser-outbound' },
+        allowWrite: input.allowWrite === true,
         browserConnectionId: typeof input.browserConnectionId === 'string' && input.browserConnectionId.length > 0
           ? input.browserConnectionId
           : null,
@@ -177,6 +187,7 @@ export function createBridgeHub({
         throw new Error(`connection is revoked: ${connectionId}`);
       }
       record.status = 'disabled';
+      record.browserConnectionId = null;
       return touch(record);
     },
 
@@ -206,6 +217,7 @@ export function makeBridgeRequestEnvelope({
     throw new Error(`unsupported bridge tool: ${tool}`);
   }
   ensureObject(args, 'args');
+  ensureNoTelegramSecrets(args);
   if (bearer === undefined && bearerHash === undefined) {
     throw new Error('either bearer or bearerHash is required');
   }
@@ -263,8 +275,10 @@ export function makeBridgeResponseEnvelope({
   };
 
   if (ok) {
+    ensureNoTelegramSecrets(result);
     envelope.result = result;
   } else {
+    ensureNoTelegramSecrets(error, new WeakSet(), true);
     envelope.error = error;
   }
 
@@ -304,6 +318,7 @@ export function parseBridgeEnvelope(input, { allowRequest = true, allowResponse 
       throw new Error(`unsupported bridge tool: ${envelope.tool}`);
     }
     ensureObject(envelope.args, 'args');
+    ensureNoTelegramSecrets(envelope.args);
     if (!envelope.auth || typeof envelope.auth !== 'object' || Array.isArray(envelope.auth)) {
       throw new Error('auth is required');
     }
@@ -343,6 +358,7 @@ export function parseBridgeEnvelope(input, { allowRequest = true, allowResponse 
       throw new Error('ok must be a boolean');
     }
     if (envelope.ok) {
+      ensureNoTelegramSecrets(envelope.result);
       return {
         version: envelope.version,
         kind: envelope.kind,
@@ -354,6 +370,7 @@ export function parseBridgeEnvelope(input, { allowRequest = true, allowResponse 
     if (!envelope.error || typeof envelope.error !== 'object' || Array.isArray(envelope.error)) {
       throw new Error('error is required');
     }
+      ensureNoTelegramSecrets(envelope.error, new WeakSet(), true);
     return {
       version: envelope.version,
       kind: envelope.kind,

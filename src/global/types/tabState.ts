@@ -102,7 +102,7 @@ import type {
   TabThread,
   ThreadId,
 } from '../../types';
-import type { WebApp, WebAppModalStateType } from '../../types/webapp';
+import type { BrowserState } from '../../types/browser';
 import type { SearchResultKey } from '../../util/keys/searchResultKey';
 import type { RegularLangFnParameters } from '../../util/localization';
 import type { ProfileCollectionKey } from '../selectors/payments';
@@ -124,12 +124,40 @@ export type AiEditorTabBase = {
   error?: 'floodPremium' | 'aiError' | 'generic';
 };
 
+type ReportOptionsSection = {
+  type: 'options';
+  title: string;
+  subtitle?: string;
+  options: {
+    text: string;
+    option: string;
+  }[];
+};
+
+type ReportCommentSection = {
+  type: 'comment';
+  title?: string;
+  isOptional?: boolean;
+  option: string;
+};
+
+export type ReportSection = ReportOptionsSection | ReportCommentSection;
+
+type MessageReportContext = {
+  option: string;
+  description: string;
+  title?: string;
+  sections: ReportSection[];
+  isSubmitting?: boolean;
+};
+
 export type TabState = {
   id: number;
   isBlurred?: boolean;
   isMasterTab: boolean;
   inactiveReason?: 'auth' | 'otherClient';
   shouldPreventComposerAnimation?: boolean;
+  isRichInputExpanded?: boolean;
   inviteHash?: string;
   canInstall?: boolean;
   isStatisticsShown?: boolean;
@@ -202,6 +230,7 @@ export type TabState = {
   selectedMessages?: {
     chatId: string;
     messageIds: number[];
+    reportContext?: MessageReportContext;
   };
 
   chatInviteModal?: {
@@ -396,6 +425,7 @@ export type TabState = {
     isMuted: boolean;
     isHidden?: boolean;
     timestamp?: number;
+    shouldLandInMediaEditor?: boolean;
   };
 
   audioPlayer: {
@@ -410,9 +440,6 @@ export type TabState = {
   };
 
   webPagePreviewId?: string;
-  instantViewModal?: {
-    webPageId: string;
-  };
 
   loadingThread?: {
     loadingChatId: string;
@@ -540,16 +567,7 @@ export type TabState = {
     description: string;
     peerId?: string;
     subject: 'story' | 'message';
-    sections: {
-      title?: string;
-      subtitle?: string;
-      options?: {
-        text: string;
-        option: string;
-      }[];
-      isOptional?: boolean;
-      option?: string;
-    }[];
+    sections: ReportSection[];
   };
 
   activeDownloads: ActiveDownloads;
@@ -611,15 +629,7 @@ export type TabState = {
     };
   };
 
-  webApps: {
-    activeWebAppKey?: string;
-    openedOrderedKeys: string[];
-    sessionKeys: string[];
-    openedWebApps: Record<string, WebApp>;
-    modalState: WebAppModalStateType;
-    isModalOpen: boolean;
-    isMoreAppsTabActive: boolean;
-  };
+  browser: BrowserState;
 
   botTrustRequest?: {
     botId: string;
@@ -749,7 +759,12 @@ export type TabState = {
     reactionContext?: ReactionDeletionContext;
   };
 
-  isWebAppsCloseConfirmationModalOpen?: boolean;
+  deleteMemberModal?: {
+    chatId: string;
+    peerId: string;
+  };
+
+  isBrowserCloseConfirmationModalOpen?: boolean;
 
   isGiftRecipientPickerOpen?: boolean;
 
@@ -882,6 +897,8 @@ export type TabState = {
 
   birthdaySetupModal?: {
     currentBirthday?: ApiBirthday;
+    suggestForUserId?: string;
+    isFromSuggestion?: boolean;
   };
 
   paidReactionModal?: {
@@ -912,6 +929,10 @@ export type TabState = {
     peerId: string;
     type: 'phone' | 'username';
     collectible: string;
+  };
+
+  qrCodeModal?: {
+    peerId: string;
   };
 
   starsBalanceModal?: {
@@ -1136,5 +1157,8 @@ export type TabState = {
     isOwner?: boolean;
     rank?: string;
   };
-  shouldOpenMessageMediaEditor?: boolean;
+  messageMediaEditorRequest?: {
+    chatId: string;
+    messageId: number;
+  };
 };

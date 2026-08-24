@@ -48,10 +48,11 @@ import useLastCallback from '../../hooks/useLastCallback';
 import useScrollableHint from '../../hooks/useScrollableHint';
 import useUniqueId from '../../hooks/useUniqueId';
 
-import Blockquote from '../common/Blockquote';
 import CodeBlock from '../common/code/CodeBlock';
 import CompactMapPreview from '../common/CompactMapPreview';
 import CompactMediaPreview from '../common/CompactMediaPreview';
+import Blockquote from '../common/quote/Blockquote';
+import Pullquote from '../common/quote/Pullquote';
 import SafeLink from '../common/SafeLink';
 import { Breakout } from '../gili/layout/Surface';
 import Photo from '../middle/message/Photo';
@@ -77,6 +78,7 @@ type OwnProps = {
   canAutoLoadMedia?: boolean;
   isProtected?: boolean;
   theme: ThemeKey;
+  fontSizeAdjust?: number;
   pageUrl?: string;
   chatId?: string;
   messageId?: number;
@@ -85,6 +87,7 @@ type OwnProps = {
   observeIntersectionForPlaying?: ObserveFn;
   sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
   sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  onTelegramChannelClick?: (channelUsername: string) => void;
 };
 
 type RichTextContext = {
@@ -112,6 +115,7 @@ const RichContent = ({
   canAutoLoadMedia,
   isProtected,
   theme,
+  fontSizeAdjust,
   pageUrl,
   chatId,
   messageId,
@@ -120,6 +124,7 @@ const RichContent = ({
   observeIntersectionForPlaying,
   sharedCanvasRef,
   sharedCanvasHqRef,
+  onTelegramChannelClick,
 }: OwnProps) => {
   const {
     openMapModal, openMediaViewer, openUrl,
@@ -129,6 +134,8 @@ const RichContent = ({
   const containerId = useUniqueId();
   const unsupportedText = lang('PageContentUnsupported');
   const embedTitle = lang('PageContentEmbed');
+  const style = fontSizeAdjust !== undefined ? `--iv-font-size-scale: ${fontSizeAdjust}` : undefined;
+  const isMessageContent = messageId !== undefined;
 
   const richTextContext: RichTextContext = {
     unsupportedText,
@@ -193,6 +200,7 @@ const RichContent = ({
     observeIntersectionForLoading,
     observeIntersectionForPlaying,
     lang,
+    onTelegramChannelClick,
   };
   function renderTopLevelBlock(block: ApiPageBlock, index: number) {
     const sourceKey = String(index);
@@ -203,7 +211,7 @@ const RichContent = ({
     }
 
     return (
-      <Breakout className={styles.mediaBreakout}>
+      <Breakout className={buildClassName(styles.mediaBreakout, isMessageContent && styles.paddedCaption)}>
         {content}
       </Breakout>
     );
@@ -217,15 +225,26 @@ const RichContent = ({
         return renderTextBlock(block.text, styles.subtitle, renderContext);
       case 'kicker':
         return renderTextBlock(block.text, styles.kicker, renderContext);
-      case 'authorDate':
+      case 'authorDate': {
+        const hasAuthor = hasRichText(block.author);
+        const publishedDate = block.publishedDate
+          ? formatDateTime(lang, new Date(block.publishedDate * 1000), { date: 'long', time: 'short' })
+          : undefined;
+
         return (
           <p className={styles.authorDate}>
-            <RichText text={block.author} {...richTextContext} />
-            {block.publishedDate
-              ? ` ${formatDateTime(lang, new Date(block.publishedDate * 1000), { date: 'long' })}`
-              : undefined}
+            {hasAuthor && <RichText text={block.author} {...richTextContext} />}
+            {hasAuthor && publishedDate && (
+              <>
+                {' '}
+                &bull;
+                {' '}
+              </>
+            )}
+            {publishedDate}
           </p>
         );
+      }
       case 'header':
       case 'heading1':
         return renderTextBlock(block.text, styles.heading1, renderContext);
@@ -293,7 +312,7 @@ const RichContent = ({
         return renderPullquoteBlock(block, renderContext);
       case 'cover':
         return (
-          <Breakout className={buildClassName(styles.mediaBreakout, styles.cover)}>
+          <Breakout className={buildClassName(styles.mediaBreakout, styles.paddedCaption, styles.cover)}>
             {renderBlock(block.cover, `${sourceKey}-cover`, true)}
           </Breakout>
         );
@@ -326,7 +345,13 @@ const RichContent = ({
       case 'slideshow':
         return renderSlideshowBlock(block, renderContext, sourceKey, shouldBreakoutMedia, handleOpenMedia);
       case 'channel':
-        return <ChannelBlock channelUsername={block.channelUsername} title={block.title} />;
+        return (
+          <ChannelBlock
+            channelUsername={block.channelUsername}
+            title={block.title}
+            onTelegramChannelClick={renderContext.onTelegramChannelClick}
+          />
+        );
       case 'embedPost':
         return (
           <EmbedPost
@@ -344,7 +369,7 @@ const RichContent = ({
   }
 
   return (
-    <div id={containerId} className={styles.richContent} dir={isRtl ? 'rtl' : 'auto'}>
+    <div id={containerId} className={styles.richContent} style={style} dir={isRtl ? 'rtl' : 'auto'}>
       {blocks.map(renderTopLevelBlock)}
     </div>
   );
@@ -374,6 +399,7 @@ type RenderBlockContext = {
   observeIntersectionForLoading?: ObserveFn;
   observeIntersectionForPlaying?: ObserveFn;
   lang: LangFn;
+  onTelegramChannelClick?: (channelUsername: string) => void;
 };
 
 type RenderBlockFn = (block: ApiPageBlock, sourceKey: string) => TeactNode;
@@ -418,7 +444,7 @@ function TableBlock({
             const isLastRow = rowIndex === block.rows.length - 1;
 
             return (
-              <tr className={block.isStriped && rowIndex % 2 ? styles.stripedRow : undefined}>
+              <tr className={block.isStriped && rowIndex % 2 === 0 ? styles.stripedRow : undefined}>
                 {row.cells.map((cell, cellIndex) => renderTableCell(
                   cell,
                   renderContext,
@@ -684,7 +710,7 @@ function renderQuoteBlock(
   context: RenderBlockContext,
 ) {
   return (
-    <Blockquote className={styles.block}>
+    <Blockquote className={styles.block} contentClassName={styles.blockquote}>
       <RichText text={block.text} {...context.richTextContext} />
       {hasRichText(block.caption) && (
         <footer className={styles.quoteCaption}>
@@ -700,14 +726,14 @@ function renderPullquoteBlock(
   context: RenderBlockContext,
 ) {
   return (
-    <aside className={buildClassName(styles.block, styles.pullquote)}>
+    <Pullquote className={buildClassName(styles.block, styles.pullquote)}>
       <RichText text={block.text} {...context.richTextContext} />
       {hasRichText(block.caption) && (
         <footer className={buildClassName(styles.quoteCaption, styles.pullquoteCaption)}>
           <RichText text={block.caption} {...context.richTextContext} />
         </footer>
       )}
-    </aside>
+    </Pullquote>
   );
 }
 
@@ -718,7 +744,7 @@ function renderBlockquoteBlocks(
   renderBlock: RenderBlockFn,
 ) {
   return (
-    <Blockquote className={styles.block}>
+    <Blockquote className={styles.block} contentClassName={styles.blockquote}>
       {block.blocks.map((nestedBlock, index) => renderBlock(nestedBlock, `${sourceKey}-quote-${index}`))}
       {hasRichText(block.caption) && (
         <footer className={styles.quoteCaption}>
@@ -800,12 +826,9 @@ function renderListItem(
 ) {
   return (
     <li className={styles.listItem}>
-      {renderCheckbox(item.isCheckbox, item.isChecked)}
-      {item.type === 'text' ? (
-        <RichText text={item.text} {...context.richTextContext} />
-      ) : (
-        item.blocks.map((block, index) => renderBlock(block, `${sourceKey}-${index}`))
-      )}
+      <div className={styles.unorderedListContent}>
+        {renderListItemContent(item, context, sourceKey, renderBlock)}
+      </div>
     </li>
   );
 }
@@ -822,12 +845,7 @@ function renderNativeOrderedListItem(
       value={item.value}
       type={item.orderType}
     >
-      {renderCheckbox(item.isCheckbox, item.isChecked)}
-      {item.type === 'text' ? (
-        <RichText text={item.text} {...context.richTextContext} />
-      ) : (
-        item.blocks.map((block, index) => renderBlock(block, `${sourceKey}-${index}`))
-      )}
+      {renderListItemContent(item, context, sourceKey, renderBlock)}
     </li>
   );
 }
@@ -841,15 +859,34 @@ function renderOrderedListItem(
   return (
     <li className={buildClassName(styles.listItem, styles.orderedListItem)}>
       <span className={styles.orderedListMarker}>{`${item.num}.`}</span>
-      <span className={styles.orderedListContent}>
-        {renderCheckbox(item.isCheckbox, item.isChecked)}
-        {item.type === 'text' ? (
-          <RichText text={item.text} {...context.richTextContext} />
-        ) : (
-          item.blocks.map((block, index) => renderBlock(block, `${sourceKey}-${index}`))
-        )}
-      </span>
+      <div className={styles.orderedListContent}>
+        {renderListItemContent(item, context, sourceKey, renderBlock)}
+      </div>
     </li>
+  );
+}
+
+function renderListItemContent(
+  item: ApiPageListItem | ApiPageListOrderedItem,
+  context: RenderBlockContext,
+  sourceKey: string,
+  renderBlock: RenderBlockFn,
+) {
+  const content = item.type === 'text' ? (
+    <RichText text={item.text} {...context.richTextContext} />
+  ) : (
+    item.blocks.map((block, index) => renderBlock(block, `${sourceKey}-${index}`))
+  );
+
+  if (!item.isCheckbox) {
+    return content;
+  }
+
+  return (
+    <div className={styles.checkboxListItem}>
+      {renderCheckbox(item.isChecked)}
+      <div className={styles.listItemContent}>{content}</div>
+    </div>
   );
 }
 
@@ -866,11 +903,7 @@ function getOrderedListType(orderType?: string) {
   }
 }
 
-function renderCheckbox(isCheckbox?: true, isChecked?: true) {
-  if (!isCheckbox) {
-    return undefined;
-  }
-
+function renderCheckbox(isChecked?: true) {
   return (
     <span className={styles.checkboxWrapper}>
       <Checkbox checked={isChecked} nonInteractive />
@@ -941,18 +974,24 @@ function renderUnsupportedBlock(unsupportedText: string, blockType?: ApiPageBloc
 type ChannelBlockOwnProps = {
   channelUsername: string;
   title: string;
+  onTelegramChannelClick?: (channelUsername: string) => void;
 };
 
 const ChannelBlock = ({
   channelUsername,
   title,
+  onTelegramChannelClick,
 }: ChannelBlockOwnProps) => {
-  const { openTelegramLink, closeInstantView } = getActions();
+  const { openTelegramLink } = getActions();
   const lang = useLang();
   const url = `${TME_LINK_PREFIX}${channelUsername}`;
 
   const handleClick = useLastCallback(() => {
-    closeInstantView();
+    if (onTelegramChannelClick) {
+      onTelegramChannelClick(channelUsername);
+      return;
+    }
+
     openTelegramLink({ url });
   });
 

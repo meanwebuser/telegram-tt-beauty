@@ -22,6 +22,7 @@ import type {
   ApiInputInvoice,
   ApiInputInvoiceStarGift,
   ApiInputMessageReplyInfo,
+  ApiInputRichMessage,
   ApiInputSavedStarGift,
   ApiInputSuggestedPostInfo,
   ApiKeyboardButton,
@@ -82,6 +83,7 @@ import type {
   CallSound,
   ChatListType,
   ConfettiParams,
+  EditingDraft,
   ForwardTarget,
   GiftProfileFilterOptions,
   GlobalSearchContent,
@@ -115,7 +117,8 @@ import type {
   TranslationTone,
   WebPageMediaSize,
 } from '../../types';
-import type { WebApp, WebAppModalStateType, WebAppOutboundEvent } from '../../types/webapp';
+import type { BrowserModalStateType, BrowserTab } from '../../types/browser';
+import type { WebApp, WebAppOutboundEvent } from '../../types/webapp';
 import type { DownloadableMedia } from '../helpers';
 import type { AiSourceChat } from './aiWorkspace';
 import type { SharedState } from './sharedState';
@@ -183,7 +186,7 @@ export interface ActionPayloads {
   };
   updateChatMemberBannedRights: {
     chatId: string;
-    userId: string;
+    peerId: string;
     bannedRights: ApiChatBannedRights;
   } & WithTabId;
   updateChatAdmin: {
@@ -380,7 +383,7 @@ export interface ActionPayloads {
   } & WithTabId;
   deleteChatMember: {
     chatId: string;
-    userId: string;
+    peerId: string;
   } & WithTabId;
   openPreviousChat: WithTabId | undefined;
   editChatFolders: {
@@ -570,7 +573,11 @@ export interface ActionPayloads {
   loadRichMessage: {
     chatId: string;
     messageId: number;
+    isScheduled?: boolean;
   };
+  startEditingMessage: {
+    messageId: number;
+  } & WithTabId;
   loadMessagesById: {
     chatId: string;
     messageIds: number[];
@@ -580,6 +587,7 @@ export interface ActionPayloads {
     text: string;
     attachments?: ApiAttachment[];
     entities?: ApiMessageEntity[];
+    richMessage?: ApiInputRichMessage;
   } & WithTabId;
   editTodo: {
     chatId: string;
@@ -767,6 +775,7 @@ export interface ActionPayloads {
     chatId: string;
     threadId: ThreadId;
     text: ApiDraft['text'];
+    richMessage?: ApiDraft['richMessage'];
   };
   clearDraft: {
     chatId: string;
@@ -1001,11 +1010,6 @@ export interface ActionPayloads {
     messageId?: number;
   } & WithTabId;
   closeChatLanguageModal: WithTabId | undefined;
-  openInstantView: {
-    webPageId: string;
-  } & WithTabId;
-  closeInstantView: WithTabId | undefined;
-
   // poll result
   openPollResults: {
     chatId: string;
@@ -1497,7 +1501,7 @@ export interface ActionPayloads {
 
   // Messages
   setEditingDraft: {
-    text?: ApiFormattedText;
+    draft?: EditingDraft;
     chatId: string;
     threadId: ThreadId;
     type: MessageListType;
@@ -1916,7 +1920,9 @@ export interface ActionPayloads {
     withDynamicLoading?: boolean;
     timestamp?: number;
   } & WithTabId;
-  closeMediaViewer: WithTabId | undefined;
+  closeMediaViewer: ({
+    shouldLandInMediaEditor?: boolean;
+  } & WithTabId) | undefined;
   updateLastPlaybackTimestamp: {
     chatId: string;
     messageId: number;
@@ -1989,12 +1995,20 @@ export interface ActionPayloads {
     lastName?: string;
     bio?: string;
     username?: string;
+    personalChannelId?: string | false;
   } & WithTabId;
+  loadPersonalChannels: undefined;
   updateBirthday: {
     birthday?: ApiBirthday;
   };
+  suggestBirthday: {
+    userId: string;
+    birthday: ApiBirthday;
+  };
   openBirthdaySetupModal: {
     currentBirthday?: ApiBirthday;
+    suggestForUserId?: string;
+    isFromSuggestion?: boolean;
   } & WithTabId;
   closeBirthdaySetupModal: WithTabId | undefined;
   updateBotProfile: {
@@ -2023,7 +2037,7 @@ export interface ActionPayloads {
   loadCommonChats: {
     userId: string;
   };
-  reportSpam: { chatId: string };
+  reportSpam: { chatId: string } & WithTabId;
   loadFullUser: { userId: string; withPhotos?: boolean };
   openAddContactDialog: { userId?: string } & WithTabId;
   openNewContactDialog: WithTabId | undefined;
@@ -2092,6 +2106,9 @@ export interface ActionPayloads {
   // Composer
   setShouldPreventComposerAnimation: {
     shouldPreventComposerAnimation: boolean;
+  } & WithTabId;
+  setIsRichInputExpanded: {
+    isRichInputExpanded?: boolean;
   } & WithTabId;
 
   // Replies
@@ -2337,6 +2354,7 @@ export interface ActionPayloads {
     shouldMarkBotTrusted?: boolean;
   } & WithTabId;
   prolongWebView: {
+    key: string;
     botId: string;
     peerId: string;
     queryId: string;
@@ -2363,8 +2381,8 @@ export interface ActionPayloads {
     isFromConfirm?: boolean;
     shouldSkipBotTrustRequest?: boolean;
   } & WithTabId;
-  openWebAppTab: {
-    webApp?: WebApp;
+  openBrowserTab: {
+    tab?: BrowserTab;
   } & WithTabId;
   openChatInviteWebView: {
     botId: string;
@@ -2372,12 +2390,14 @@ export interface ActionPayloads {
     queryId?: string;
     peerId?: string;
     isFullscreen?: boolean;
+    isSameOrigin?: true;
     isBroadcast?: boolean;
   } & WithTabId;
   loadPreviewMedias: {
     botId: string;
   };
   setWebAppPaymentSlug: {
+    key: string;
     slug?: string;
   } & WithTabId;
 
@@ -2493,10 +2513,9 @@ export interface ActionPayloads {
     chatId: string;
     usernames: string[];
   };
-  closeActiveWebApp: WithTabId | undefined;
   openMoreAppsTab: WithTabId | undefined;
   closeMoreAppsTab: WithTabId | undefined;
-  closeWebApp: {
+  closeBrowserTab: {
     key: string;
     skipClosingConfirmation?: boolean;
   } & WithTabId;
@@ -2504,16 +2523,16 @@ export interface ActionPayloads {
     webAppKey: string;
     event: WebAppOutboundEvent;
   } & WithTabId;
-  closeWebAppModal: ({
+  closeBrowserModal: ({
     shouldSkipConfirmation?: boolean;
   } & WithTabId) | undefined;
-  changeWebAppModalState: {
-    state: WebAppModalStateType;
+  changeBrowserModalState: {
+    state: BrowserModalStateType;
   } & WithTabId;
-  updateMiniAppCachedPosition: {
+  updateBrowserCachedPosition: {
     position: Point;
   };
-  updateMiniAppCachedSize: {
+  updateBrowserCachedSize: {
     size: Size;
   };
   // Misc
@@ -2607,6 +2626,11 @@ export interface ActionPayloads {
     collectible: string;
   } & WithTabId;
   closeCollectibleInfoModal: WithTabId | undefined;
+
+  openQrCodeModal: {
+    peerId: string;
+  } & WithTabId;
+  closeQrCodeModal: WithTabId | undefined;
 
   // Calls
   joinGroupCall: {
@@ -2845,9 +2869,9 @@ export interface ActionPayloads {
   openQuickChatPicker: WithTabId | undefined;
   closeQuickChatPicker: WithTabId | undefined;
 
-  openWebAppsCloseConfirmationModal: WithTabId | undefined;
+  openBrowserCloseConfirmationModal: WithTabId | undefined;
 
-  closeWebAppsCloseConfirmationModal: ({
+  closeBrowserCloseConfirmationModal: ({
     shouldSkipInFuture?: boolean;
   } & WithTabId);
 
@@ -2886,6 +2910,12 @@ export interface ActionPayloads {
     reactionContext?: ReactionDeletionContext;
   } & WithTabId);
   closeDeleteMessageModal: WithTabId | undefined;
+
+  openDeleteMemberModal: ({
+    chatId: string;
+    peerId: string;
+  } & WithTabId);
+  closeDeleteMemberModal: WithTabId | undefined;
 
   deleteParticipantReaction: {
     chatId: string;
@@ -3349,7 +3379,10 @@ export interface ActionPayloads {
   openCocoonModal: WithTabId | undefined;
   closeCocoonModal: WithTabId | undefined;
 
-  requestMessageMediaEditor: WithTabId | undefined;
+  requestMessageMediaEditor: {
+    chatId: string;
+    messageId: number;
+  } & WithTabId;
   resetMessageMediaEditorRequest: WithTabId | undefined;
 }
 

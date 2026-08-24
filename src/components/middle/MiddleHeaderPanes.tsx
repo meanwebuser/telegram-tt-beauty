@@ -12,11 +12,12 @@ import {
   selectCanAnimateRightColumn,
   selectChat,
   selectCurrentMiddleSearch,
+  selectTabState,
   selectUserFullInfo,
 } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import { REM } from '../common/helpers/mediaDimensions';
-import { BOTTOM_PIN_THRESHOLD, SCROLL_BOTTOM_SENTINEL, TOP_PIN_THRESHOLD } from './helpers/messageListReserves';
+import { AT_BOTTOM_THRESHOLD, AT_TOP_THRESHOLD, SCROLL_BOTTOM_SENTINEL } from './helpers/messageListReserves';
 
 import useEffectOnce from '../../hooks/useEffectOnce';
 import useShowTransition from '../../hooks/useShowTransition';
@@ -47,10 +48,11 @@ type StateProps = {
   chat?: ApiChat;
   userFullInfo?: ApiUserFullInfo;
   withRightColumnAnimation?: boolean;
-  isMiddleSearchOpen?: boolean;
+  isHidden?: boolean;
 };
 
 const FALLBACK_PANE_STATE = { height: 0 };
+const SCROLL_POSITION_TOLERANCE = 1;
 
 const panesHeightCache = new Map<string, number>();
 
@@ -67,8 +69,8 @@ const MiddleHeaderPanes = ({
   userFullInfo,
   getCurrentPinnedIndex,
   getLoadingPinnedId,
+  isHidden,
   withRightColumnAnimation,
-  isMiddleSearchOpen,
   onFocusPinnedMessage,
 }: OwnProps & StateProps) => {
   const { settings } = userFullInfo || {};
@@ -91,15 +93,15 @@ const MiddleHeaderPanes = ({
     const middleColumn = document.getElementById('MiddleColumn');
     if (!middleColumn) return;
     setExtraStyles(middleColumn, {
-      '--middle-header-panes-height': isMiddleSearchOpen ? '0px' : `${panesHeightCache.get(cacheKey) ?? 0}px`,
+      '--middle-header-panes-height': isHidden ? '0px' : `${panesHeightCache.get(cacheKey) ?? 0}px`,
     });
-  }, [isMiddleSearchOpen, cacheKey]);
+  }, [isHidden, cacheKey]);
 
   const {
     shouldRender,
     ref,
   } = useShowTransition({
-    isOpen: !isMiddleSearchOpen,
+    isOpen: !isHidden,
     withShouldRender: true,
     noMountTransition: true,
   });
@@ -152,8 +154,8 @@ const MiddleHeaderPanes = ({
         .filter((scroller) => scroller.offsetParent)
         .map((scroller) => ({
           scroller,
-          wasAtBottom: scroller.scrollHeight - scroller.scrollTop - scroller.offsetHeight <= BOTTOM_PIN_THRESHOLD,
-          wasAtTop: scroller.scrollTop <= TOP_PIN_THRESHOLD,
+          wasAtBottom: scroller.scrollHeight - scroller.scrollTop - scroller.offsetHeight <= AT_BOTTOM_THRESHOLD,
+          wasAtTop: scroller.scrollTop <= AT_TOP_THRESHOLD,
           prevScrollTop: scroller.scrollTop,
           bottomDistance: scroller.scrollHeight - scroller.scrollTop,
         }));
@@ -169,7 +171,15 @@ const MiddleHeaderPanes = ({
       if (!plans.length) return;
 
       requestForcedReflow(() => {
-        const targets = plans.map(({
+        const validPlans = plans.filter(({ scroller, prevScrollTop }) => {
+          const currentScrollTop = scroller.scrollTop;
+          return Math.abs(currentScrollTop - prevScrollTop) <= SCROLL_POSITION_TOLERANCE
+            || Math.abs(currentScrollTop - (prevScrollTop + panesHeightDelta)) <= SCROLL_POSITION_TOLERANCE;
+        });
+
+        if (!validPlans.length) return undefined;
+
+        const targets = validPlans.map(({
           scroller, wasAtBottom, wasAtTop, prevScrollTop, bottomDistance,
         }) => {
           let scrollTop;
@@ -257,12 +267,13 @@ export default memo(withGlobal<OwnProps>(
   }): Complete<StateProps> => {
     const chat = selectChat(global, chatId);
     const userFullInfo = selectUserFullInfo(global, chatId);
+    const shouldHide = Boolean(selectCurrentMiddleSearch(global) || selectTabState(global).isRichInputExpanded);
 
     return {
       chat,
       userFullInfo,
       withRightColumnAnimation: selectCanAnimateRightColumn(global),
-      isMiddleSearchOpen: Boolean(selectCurrentMiddleSearch(global)),
+      isHidden: shouldHide,
     };
   },
 )(MiddleHeaderPanes));

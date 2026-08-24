@@ -11,6 +11,7 @@ import type {
   ApiFactCheck,
   ApiInputMessageReplyInfo,
   ApiInputReplyInfo,
+  ApiInputRichMessage,
   ApiInputSuggestedPostInfo,
   ApiMediaTodo,
   ApiMessage,
@@ -50,6 +51,7 @@ import {
 } from '../../../config';
 import { getEmojiOnlyCountForMessage } from '../../../global/helpers/getEmojiOnlyCountForMessage';
 import { addTimestampEntities } from '../../../util/dates/timestamp';
+import { generateWaveform } from '../../../util/generateWaveform';
 import { omitUndefined } from '../../../util/iteratees';
 import { toJSNumber } from '../../../util/numbers';
 import { getServerTime } from '../../../util/serverTime';
@@ -77,7 +79,12 @@ import {
 } from './common';
 import { type OmitVirtualFields } from './helpers';
 import { buildApiMessageAction } from './messageActions';
-import { buildMessageContent, buildMessageMediaContent, buildMessageTextContent } from './messageContent';
+import {
+  buildApiRichMessage,
+  buildMessageContent,
+  buildMessageMediaContent,
+  buildMessageTextContent,
+} from './messageContent';
 import { buildApiRestrictionReasons } from './misc';
 import { buildApiPeerColor, buildApiPeerId, getApiChatIdFromMtpPeer } from './peers';
 import { buildMessageReactions } from './reactions';
@@ -309,7 +316,7 @@ export function buildMessageDraft(draft: GramJs.TypeDraftMessage): ApiDraft | un
   }
 
   const {
-    message, entities, replyTo, date, effect, suggestedPost,
+    message, entities, replyTo, date, effect, suggestedPost, richMessage,
   } = draft;
 
   const replyInfo = replyTo instanceof GramJs.InputReplyToMessage ? {
@@ -330,7 +337,8 @@ export function buildMessageDraft(draft: GramJs.TypeDraftMessage): ApiDraft | un
   } satisfies ApiInputSuggestedPostInfo : undefined;
 
   return {
-    text: message ? buildMessageTextContent(message, entities) : undefined,
+    text: richMessage ? undefined : message ? buildMessageTextContent(message, entities) : undefined,
+    richMessage: richMessage ? buildApiRichMessage(richMessage) : undefined,
     replyInfo,
     suggestedPostInfo,
     date,
@@ -460,6 +468,7 @@ export function buildLocalMessage({
   lastMessageId,
   text,
   entities,
+  richMessage,
   replyInfo,
   suggestedPostInfo,
   attachment,
@@ -483,6 +492,7 @@ export function buildLocalMessage({
   lastMessageId?: number;
   text?: string;
   entities?: ApiMessageEntity[];
+  richMessage?: ApiInputRichMessage;
   replyInfo?: ApiInputReplyInfo;
   suggestedPostInfo?: ApiInputSuggestedPostInfo;
   attachment?: ApiAttachment;
@@ -526,6 +536,7 @@ export function buildLocalMessage({
     chatId: chat.id,
     content: omitUndefined({
       text: formattedText,
+      richMessage,
       ...media,
       sticker,
       video: gif || media?.video,
@@ -570,6 +581,7 @@ export function buildLocalForwardedMessage({
   scheduleRepeatPeriod,
   noAuthors,
   noCaptions,
+  privateForwardName,
   isCurrentUserPremium,
   lastMessageId,
   sendAs,
@@ -582,6 +594,7 @@ export function buildLocalForwardedMessage({
   scheduleRepeatPeriod?: number;
   noAuthors?: boolean;
   noCaptions?: boolean;
+  privateForwardName?: string;
   isCurrentUserPremium?: boolean;
   lastMessageId?: number;
   sendAs?: ApiPeer;
@@ -591,16 +604,13 @@ export function buildLocalForwardedMessage({
   const {
     content,
     chatId: fromChatId,
-    id: fromMessageId,
-    senderId,
     groupedId,
     isInAlbum,
     isInvertedMedia,
   } = message;
 
-  const isAudio = content.audio;
   const asIncomingInChatWithSelf = (
-    toChat.id === currentUserId && (fromChatId !== toChat.id || message.forwardInfo) && !isAudio
+    toChat.id === currentUserId && (fromChatId !== toChat.id || message.forwardInfo)
   );
   const shouldHideText = Object.keys(content).length > 1 && content.text && noCaptions;
   const shouldDropCustomEmoji = !isCurrentUserPremium;
@@ -611,6 +621,7 @@ export function buildLocalForwardedMessage({
   const textWithTimestamps = strippedText && addTimestampEntities(strippedText);
   const emojiOnlyCount = getEmojiOnlyCountForMessage(content, groupedId);
   if (emojiOnlyCount && textWithTimestamps) textWithTimestamps.emojiOnlyCount = emojiOnlyCount;
+  const forwardInfo = buildLocalForwardInfo(message, privateForwardName, noAuthors);
 
   const updatedContent = {
     ...content,
@@ -641,22 +652,38 @@ export function buildLocalForwardedMessage({
     replyInfo,
     isInvertedMedia,
     effectId,
+    forwardInfo,
     ...(toThreadId && toChat?.isForum && { isTopicReply: true }),
-
-    // Forward info doesn't get added when user forwards own messages and when forwarding audio
-    ...(message.chatId !== currentUserId && !isAudio && !noAuthors && {
-      forwardInfo: {
-        date: message.forwardInfo?.date || message.date,
-        savedDate: message.date,
-        isChannelPost: false,
-        fromChatId,
-        fromMessageId,
-        fromId: senderId,
-        savedFromPeerId: message.chatId,
-      },
-    }),
-    ...(message.chatId === currentUserId && !noAuthors && { forwardInfo: message.forwardInfo }),
     ...(scheduledAt && { isScheduled: true }),
+  };
+}
+
+function buildLocalForwardInfo(
+  message: ApiMessage,
+  privateForwardName?: string,
+  noAuthors?: boolean,
+): ApiMessageForwardInfo | undefined {
+  if (noAuthors || message.isOutgoing) return undefined;
+  if (message.chatId === currentUserId) return message.forwardInfo;
+
+  const date = message.forwardInfo?.date || message.date;
+  if (privateForwardName !== undefined) {
+    return {
+      date,
+      savedDate: message.date,
+      isChannelPost: false,
+      hiddenUserName: privateForwardName,
+    };
+  }
+
+  return {
+    date,
+    savedDate: message.date,
+    isChannelPost: false,
+    fromChatId: message.chatId,
+    fromMessageId: message.id,
+    fromId: message.senderId,
+    savedFromPeerId: message.chatId,
   };
 }
 
@@ -698,6 +725,7 @@ export function buildUploadingMedia(
     shouldSendAsFile,
     shouldSendAsSpoiler,
     ttlSeconds,
+    isRoundVideo,
   } = attachment;
 
   if (!shouldSendAsFile) {
@@ -717,7 +745,7 @@ export function buildUploadingMedia(
           },
         };
       }
-      if (SUPPORTED_VIDEO_CONTENT_TYPES.has(mimeType)) {
+      if (isRoundVideo || SUPPORTED_VIDEO_CONTENT_TYPES.has(mimeType)) {
         const { width, height, duration } = attachment.quick;
         return {
           video: {
@@ -732,13 +760,18 @@ export function buildUploadingMedia(
             ...(previewBlobUrl && { thumbnail: { width, height, dataUri: previewBlobUrl } }),
             size,
             isSpoiler: shouldSendAsSpoiler,
+            isRound: isRoundVideo,
+            waveform: isRoundVideo ? generateWaveform(duration || 0) : undefined,
           },
+          ttlSeconds,
         };
       }
     }
     if (attachment.voice) {
       const { duration, waveform } = attachment.voice;
-      const { data: inputWaveform } = interpolateArray(waveform, INPUT_WAVEFORM_LENGTH);
+      const inputWaveform = waveform.length === INPUT_WAVEFORM_LENGTH
+        ? waveform
+        : interpolateArray(waveform, INPUT_WAVEFORM_LENGTH).data;
       return {
         voice: {
           mediaType: 'voice',

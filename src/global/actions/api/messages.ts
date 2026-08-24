@@ -23,7 +23,7 @@ import type {
 import type { MessageKey } from '../../../util/keys/messageKey';
 import type { RequiredGlobalActions } from '../../index';
 import type {
-  ActionReturnType, GlobalState, TabArgs,
+  ActionReturnType, GlobalState, ReportSection, TabArgs,
 } from '../../types';
 import { MAIN_THREAD_ID, MESSAGE_DELETED } from '../../../api/types';
 import { LoadMoreDirection } from '../../../types';
@@ -105,6 +105,7 @@ import {
   updateQuickReplies,
   updateQuickReplyMessages,
   updateRequestedMessageTranslation,
+  updateScheduledMessage,
   updateScheduledMessages,
   updateSponsoredMessage,
   updateTopicWithState,
@@ -354,7 +355,7 @@ addActionHandler('loadMessage', async (global, actions, payload): Promise<void> 
 
 addActionHandler('loadRichMessage', async (global, actions, payload): Promise<void> => {
   const {
-    chatId, messageId,
+    chatId, messageId, isScheduled,
   } = payload;
 
   const chat = selectChat(global, chatId);
@@ -368,11 +369,13 @@ addActionHandler('loadRichMessage', async (global, actions, payload): Promise<vo
   }
 
   global = getGlobal();
-  const currentMessage = selectChatMessage(global, chat.id, messageId);
+  const currentMessage = isScheduled
+    ? selectScheduledMessage(global, chat.id, messageId)
+    : selectChatMessage(global, chat.id, messageId);
   const partCutoff = currentMessage?.content.richMessage?.partCutoff;
   const richMessage = result.message.content.richMessage;
 
-  global = updateChatMessage(global, chat.id, messageId, {
+  const updatedMessage = {
     ...result.message,
     content: {
       ...result.message.content,
@@ -381,8 +384,47 @@ addActionHandler('loadRichMessage', async (global, actions, payload): Promise<vo
         partCutoff,
       } : richMessage,
     },
-  });
+  };
+  global = isScheduled
+    ? updateScheduledMessage(global, chat.id, messageId, updatedMessage)
+    : updateChatMessage(global, chat.id, messageId, updatedMessage);
   setGlobal(global);
+});
+
+addActionHandler('startEditingMessage', async (global, actions, payload): Promise<void> => {
+  const { messageId, tabId = getCurrentTabId() } = payload;
+  const messageList = selectCurrentMessageList(global, tabId);
+  if (!messageList) {
+    return;
+  }
+
+  const { chatId, threadId, type } = messageList;
+  const isScheduled = type === 'scheduled' || undefined;
+  const message = isScheduled
+    ? selectScheduledMessage(global, chatId, messageId)
+    : selectChatMessage(global, chatId, messageId);
+  if (!message) {
+    return;
+  }
+
+  if (message.content.richMessage?.isPart) {
+    await getPromiseActions().loadRichMessage({ chatId, messageId, isScheduled });
+
+    global = getGlobal();
+    const currentMessageList = selectCurrentMessageList(global, tabId);
+    const richMessage = (isScheduled
+      ? selectScheduledMessage(global, chatId, messageId)
+      : selectChatMessage(global, chatId, messageId))?.content.richMessage;
+    const isSameMessageList = currentMessageList?.chatId === chatId
+      && currentMessageList.threadId === threadId
+      && currentMessageList.type === type;
+
+    if (!isSameMessageList || !richMessage || richMessage.isPart) {
+      return;
+    }
+  }
+
+  actions.setEditingId({ messageId, tabId });
 });
 
 addActionHandler('loadMessagesById', async (global, actions, payload): Promise<void> => {
@@ -521,7 +563,9 @@ addActionHandler('sendMessage', async (global, actions, payload): Promise<void> 
     messagePriceInStars,
     isStoryReply,
     dice,
-    text: !dice ? payload.text : undefined,
+    text: !dice && !payload.richMessage ? payload.text : undefined,
+    entities: payload.richMessage ? undefined : payload.entities,
+    richMessage: payload.richMessage,
     isPending: messagePriceInStars ? true : undefined,
     ...suggestedMessage && { isInvertedMedia: suggestedMessage?.isInvertedMedia },
   };
@@ -629,14 +673,15 @@ addActionHandler('sendMessage', async (global, actions, payload): Promise<void> 
     }
   } else {
     const {
-      text, entities, attachments, replyInfo: replyToForFirstMessage, ...commonParams
+      text, entities, richMessage, attachments, replyInfo: replyToForFirstMessage, ...commonParams
     } = params;
 
-    if (text) {
+    if (text || richMessage) {
       const sendParams = {
         ...commonParams,
         text,
         entities,
+        richMessage,
         replyInfo: replyToForFirstMessage,
         wasDrafted: Boolean(draft),
       };
@@ -705,7 +750,7 @@ addActionHandler('sendDiceInCurrentChat', (global, actions, payload): ActionRetu
 
 addActionHandler('editMessage', (global, actions, payload): ActionReturnType => {
   const {
-    messageList, text, entities, attachments, tabId = getCurrentTabId(),
+    messageList, text, entities, richMessage, attachments, tabId = getCurrentTabId(),
   } = payload;
 
   if (!messageList) {
@@ -739,7 +784,8 @@ addActionHandler('editMessage', (global, actions, payload): ActionReturnType => 
       message,
       attachment: attachments ? attachments[0] : undefined,
       text,
-      entities,
+      entities: richMessage ? undefined : entities,
+      richMessage,
       noWebPage: selectNoWebPage(global, chatId, threadId),
     }, progressCallback);
 
@@ -793,10 +839,10 @@ addActionHandler('cancelUploadMedia', (global, actions, payload): ActionReturnTy
 
 addActionHandler('saveDraft', (global, actions, payload): ActionReturnType => {
   const {
-    chatId, threadId, text,
+    chatId, threadId, text, richMessage,
   } = payload;
   const chat = selectChat(global, chatId);
-  if (!text || !chat) {
+  if ((!text && !richMessage) || !chat) {
     return;
   }
 
@@ -807,7 +853,8 @@ addActionHandler('saveDraft', (global, actions, payload): ActionReturnType => {
   }
 
   const newDraft: ApiDraft = {
-    text,
+    text: richMessage ? undefined : text,
+    richMessage,
     replyInfo: currentDraft?.replyInfo,
     effectId: currentDraft?.effectId,
     suggestedPostInfo: currentDraft?.suggestedPostInfo,
@@ -883,7 +930,7 @@ addActionHandler('resetDraftReplyInfo', (global, actions, payload): ActionReturn
   if (chat?.isMonoforum && !currentDraft?.replyInfo && !currentDraft?.suggestedPostInfo) {
     return; // Monoforum doesn't support drafts outside threads
   }
-  const newDraft: ApiDraft | undefined = !currentDraft?.text ? undefined : {
+  const newDraft: ApiDraft | undefined = !currentDraft?.text && !currentDraft?.richMessage ? undefined : {
     ...currentDraft,
     replyInfo: undefined,
   };
@@ -907,7 +954,7 @@ addActionHandler('updateDraftSuggestedPostInfo', (global, actions, payload): Act
   const updatedSuggestedPostInfo = {
     ...currentDraft?.suggestedPostInfo,
     ...update,
-  } as ApiInputSuggestedPostInfo;
+  } satisfies ApiInputSuggestedPostInfo;
 
   const newDraft: ApiDraft = {
     ...currentDraft,
@@ -1036,12 +1083,16 @@ async function saveDraft<T extends GlobalState>({
     draft: newDraft,
   });
 
-  if (result && newDraft) {
-    newDraft.isLocal = false;
-  }
+  if (!result || !newDraft) return;
 
   global = getGlobal();
-  global = replaceThreadLocalStateParam(global, chatId, threadId, 'draft', newDraft);
+  if (selectDraft(global, chatId, threadId) !== newDraft) return;
+
+  const savedDraft: ApiDraft = {
+    ...newDraft,
+    isLocal: false,
+  };
+  global = replaceThreadLocalStateParam(global, chatId, threadId, 'draft', savedDraft);
 
   setGlobal(global);
 }
@@ -1219,21 +1270,86 @@ addActionHandler('reportMessages', async (global, actions, payload): Promise<voi
     messageIds, description = '', option = '', chatId, tabId = getCurrentTabId(),
   } = payload;
   const chat = selectChat(global, chatId)!;
+  const { selectedMessages, reportModal } = selectTabState(global, tabId);
+  const reportContext = selectedMessages?.reportContext;
+  const reportSections = reportContext?.sections || reportModal?.sections || [];
+  const latestReportSection = reportSections[reportSections.length - 1];
+  const selectedOption = latestReportSection?.type === 'options'
+    ? latestReportSection.options.find((item) => item.option === option)
+    : undefined;
+  const reportTitle = reportContext?.title || selectedOption?.text || latestReportSection?.title;
 
-  const response = await callApi('reportMessages', {
-    peer: chat, messageIds, description, option,
-  });
+  if (reportContext) {
+    global = updateTabState(global, {
+      selectedMessages: {
+        ...selectedMessages,
+        reportContext: {
+          ...reportContext,
+          isSubmitting: true,
+        },
+      },
+    }, tabId);
+    setGlobal(global);
+  }
 
-  if (!response) return;
+  let response;
+  try {
+    response = await callApi('reportMessages', {
+      peer: chat, messageIds, description, option,
+    });
+  } catch (err) {
+    actions.closeReportModal({ tabId });
+    if (reportContext) actions.exitMessageSelectMode({ tabId });
+    throw err;
+  }
+
+  if (!response) {
+    if (!reportContext) return;
+
+    global = getGlobal();
+    const currentSelectedMessages = selectTabState(global, tabId).selectedMessages;
+    const currentReportContext = currentSelectedMessages?.reportContext;
+    if (currentReportContext?.sections !== reportContext.sections) return;
+
+    global = updateTabState(global, {
+      selectedMessages: {
+        ...currentSelectedMessages!,
+        reportContext: {
+          ...currentReportContext,
+          isSubmitting: undefined,
+        },
+      },
+    }, tabId);
+    setGlobal(global);
+    return;
+  }
+
+  if (reportContext) {
+    global = getGlobal();
+    if (selectTabState(global, tabId).selectedMessages?.reportContext?.sections !== reportContext.sections) {
+      return;
+    }
+  }
 
   const { result, error } = response;
 
   if (error === MESSAGE_ID_REQUIRED_ERROR) {
-    actions.showNotification({
-      message: oldTranslate('lng_report_please_select_messages'),
-      tabId,
-    });
-    actions.closeReportModal({ tabId });
+    global = getGlobal();
+    const currentSelectedMessages = selectTabState(global, tabId).selectedMessages;
+    global = updateTabState(global, {
+      reportModal: undefined,
+      selectedMessages: {
+        chatId,
+        messageIds: reportContext ? currentSelectedMessages?.messageIds || [] : [],
+        reportContext: {
+          option,
+          description,
+          title: reportTitle,
+          sections: reportSections,
+        },
+      },
+    }, tabId);
+    setGlobal(global);
     return;
   }
 
@@ -1247,25 +1363,28 @@ addActionHandler('reportMessages', async (global, actions, payload): Promise<voi
       tabId,
     });
     actions.closeReportModal({ tabId });
+    if (reportContext) {
+      actions.exitMessageSelectMode({ tabId });
+    }
     return;
   }
 
   if (result.type === 'selectOption') {
     global = getGlobal();
-    const oldSections = selectTabState(global, tabId).reportModal?.sections;
-    const selectedOption = oldSections?.[oldSections.length - 1]?.options?.find((o) => o.option === option);
     const newSection = {
+      type: 'options',
       title: result.title,
       options: result.options,
-      subtitle: selectedOption?.text,
-    };
+      subtitle: reportTitle,
+    } satisfies ReportSection;
     global = updateTabState(global, {
+      selectedMessages: reportContext ? undefined : selectTabState(global, tabId).selectedMessages,
       reportModal: {
         chatId,
         messageIds,
         description,
         subject: 'message',
-        sections: oldSections ? [...oldSections, newSection] : [newSection],
+        sections: [...reportSections, newSection],
       },
     }, tabId);
     setGlobal(global);
@@ -1273,20 +1392,20 @@ addActionHandler('reportMessages', async (global, actions, payload): Promise<voi
 
   if (result.type === 'comment') {
     global = getGlobal();
-    const oldSections = selectTabState(global, tabId).reportModal?.sections;
-    const selectedOption = oldSections?.[oldSections.length - 1]?.options?.find((o) => o.option === option);
     const newSection = {
+      type: 'comment',
       isOptional: result.isOptional,
       option: result.option,
-      title: selectedOption?.text,
-    };
+      title: reportTitle,
+    } satisfies ReportSection;
     global = updateTabState(global, {
+      selectedMessages: reportContext ? undefined : selectTabState(global, tabId).selectedMessages,
       reportModal: {
         chatId,
         messageIds,
         description,
         subject: 'message',
-        sections: oldSections ? [...oldSections, newSection] : [newSection],
+        sections: [...reportSections, newSection],
       },
     }, tabId);
     setGlobal(global);
@@ -1704,7 +1823,7 @@ async function executeForwardMessages(global: GlobalState, sendParams: SendMessa
     fromChatId, messageIds, toChatId, withMyScore, noAuthors, noCaptions, toThreadId = MAIN_THREAD_ID,
   } = selectTabState(global, tabId).forwardMessages;
   const { messagePriceInStars, isSilent, scheduledAt, scheduleRepeatPeriod, effectId, attachments } = sendParams;
-  const isForwardOnly = !sendParams.text && !attachments?.length;
+  const isForwardOnly = !sendParams.text && !sendParams.richMessage && !attachments?.length;
   const forwardEffectId = isForwardOnly ? effectId : undefined;
 
   const isCurrentUserPremium = selectIsCurrentUserPremium(global);
@@ -1723,6 +1842,7 @@ async function executeForwardMessages(global: GlobalState, sendParams: SendMessa
     return undefined;
   }
 
+  const privateForwardName = selectUserFullInfo(global, fromChat.id)?.privateForwardName;
   const sendAs = selectSendAs(global, toChatId!);
   const draft = selectDraft(global, toChatId!, toThreadId || MAIN_THREAD_ID);
   const lastMessageId = selectChatLastMessageId(global, toChat.id);
@@ -1747,6 +1867,7 @@ async function executeForwardMessages(global: GlobalState, sendParams: SendMessa
         withMyScore,
         noAuthors,
         noCaptions,
+        privateForwardName,
         isCurrentUserPremium,
         wasDrafted: Boolean(draft),
         lastMessageId,
@@ -2582,7 +2703,7 @@ addActionHandler('openUrl', async (global, actions, payload): Promise<void> => {
   if (tryInstant) {
     const localWebPage = previewId ? selectWebPage(global, previewId) : undefined;
     if (localWebPage?.webpageType === 'full' && localWebPage.cachedPage) {
-      actions.openInstantView({ webPageId: localWebPage.id, tabId });
+      actions.openBrowserTab({ tab: { type: 'instantView', webPageId: localWebPage.id }, tabId });
       return;
     }
 
@@ -2595,13 +2716,17 @@ addActionHandler('openUrl', async (global, actions, payload): Promise<void> => {
     }
 
     if (webPage?.webpageType === 'full' && webPage.cachedPage) {
-      actions.openInstantView({ webPageId: webPage.id, tabId });
+      actions.openBrowserTab({ tab: { type: 'instantView', webPageId: webPage.id }, tabId });
       return;
     }
   }
 
   const { appConfig, config } = global;
-  if (config?.autologinToken && appConfig.autologinDomains.includes(parsedUrl.hostname)) {
+  if (
+    parsedUrl.protocol === 'https:'
+    && config?.autologinToken
+    && appConfig.autologinDomains.includes(parsedUrl.hostname)
+  ) {
     parsedUrl.searchParams.set(AUTOLOGIN_TOKEN_KEY, config.autologinToken);
     window.open(parsedUrl.href, '_blank', 'noopener');
     return;
@@ -2805,6 +2930,7 @@ function forwardMessagesToChat({
   noCaptions,
   isCurrentUserPremium,
 }: ForwardToChatOptions) {
+  const privateForwardName = selectUserFullInfo(global, fromChat.id)?.privateForwardName;
   const sendAs = selectSendAs(global, toChat.id);
   const threadInfo = toThreadId !== MAIN_THREAD_ID ? selectThreadInfo(global, toChat.id, toThreadId) : undefined;
   const lastMessageId = toThreadId === MAIN_THREAD_ID
@@ -2844,6 +2970,7 @@ function forwardMessagesToChat({
         withMyScore,
         noAuthors,
         noCaptions,
+        privateForwardName,
         isCurrentUserPremium,
         wasDrafted: false,
         lastMessageId,

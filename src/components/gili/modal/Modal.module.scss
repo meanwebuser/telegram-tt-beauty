@@ -243,6 +243,10 @@
     margin-top: 1rem;
   }
 
+  .footerActionsVertical {
+    flex-direction: column;
+  }
+
   .closeButton {
     grid-column: 1;
     grid-row: 1 / -1;
@@ -252,8 +256,8 @@
   .closeButtonAbsolute {
     position: absolute;
     z-index: 2;
-    top: 0.75rem;
     inset-inline-start: 0.75rem;
+    top: 0.75rem;
   }
 
   @keyframes panelOpen {

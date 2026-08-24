@@ -34,7 +34,7 @@ jobs:
             'bGxtLmJlemJhcm9ib3RueWkuY29t'
             'd2hpc3Blci5iZXpyYWJvdG55aS5jb20='
             'MTkyLjE2OC4='
-            'd2hpc3BlcnNlcnZlcg=='
+            'd2hpc3BlcnZlcg=='
           )
 
           violations=()

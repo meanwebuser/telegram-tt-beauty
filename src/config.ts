@@ -67,8 +67,7 @@ export const MEDIA_PROGRESSIVE_CACHE_NAME = 'tt-media-progressive';
 export const MEDIA_CACHE_MAX_BYTES = 512 * 1024; // 512 KB
 export const CUSTOM_BG_CACHE_NAME = 'tt-custom-bg';
 export const LANG_CACHE_NAME = 'tt-lang-packs-v52';
-// Bump when a release must evict assets cached by an older service worker.
-export const ASSET_CACHE_NAME = 'tt-assets-v3';
+export const ASSET_CACHE_NAME = 'tt-assets-v2';
 export const AUTODOWNLOAD_FILESIZE_MB_LIMITS = [1, 5, 10, 50, 100, 500];
 export const DATA_BROADCAST_CHANNEL_PREFIX = 'tt-global';
 export const ESTABLISH_BROADCAST_CHANNEL_PREFIX = 'tt-establish';
@@ -147,6 +146,10 @@ export const ANIMATION_LEVEL_DEFAULT = ANIMATION_LEVEL_MED;
 export const DEFAULT_MESSAGE_TEXT_SIZE_PX = 16;
 export const IOS_DEFAULT_MESSAGE_TEXT_SIZE_PX = 17;
 export const MACOS_DEFAULT_MESSAGE_TEXT_SIZE_PX = 15;
+export const INSTANT_VIEW_FONT_SIZE_ADJUST_DEFAULT = 1;
+export const INSTANT_VIEW_FONT_SIZE_ADJUST_MIN = 0.5;
+export const INSTANT_VIEW_FONT_SIZE_ADJUST_MAX = 1.5;
+export const INSTANT_VIEW_FONT_SIZE_ADJUST_STEP = 0.1;
 
 export const NBSP = '\u00A0';
 export const NNBSP = '\u202F';
@@ -162,6 +165,15 @@ export const SEND_MESSAGE_ACTION_INTERVAL = 3000; // 3s
 // 10000s from https://corefork.telegram.org/api/url-authorization#automatic-authorization
 export const APP_CONFIG_REFETCH_INTERVAL = 10000 * 1000;
 export const GENERAL_REFETCH_INTERVAL = 60 * 60 * 1000; // 1h
+
+// Round video message recording
+export const ROUND_VIDEO_RECORDING_SIZE = 400; // px, square output
+export const MAX_ROUND_VIDEO_RECORDING_DURATION = 60 * 1000; // ms
+export const MIN_ROUND_VIDEO_RECORDING_TIME = 1000; // ms, recordings shorter than this are discarded
+export const VIDEO_RECORDING_FILENAME = 'video.mp4';
+export const VIDEO_RECORDING_MIME_TYPE = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
+export const ROUND_VIDEO_BITRATE = 1_200_000; // bps
+export const ROUND_AUDIO_BITRATE = 64_000; // bps
 
 export const EDITABLE_INPUT_ID = 'editable-message-text';
 export const EDITABLE_INPUT_MODAL_ID = 'editable-message-text-modal';
@@ -324,7 +336,7 @@ export const SUPPORTED_TRANSLATION_LANGUAGES = [
 export const RE_LINK_TEMPLATE = '((ftp|https?):\\/\\/)?((www\\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\\.[a-zA-Z][-a-zA-Z0-9]{1,62})\\b([-a-zA-Z0-9()@:%_+.,~#?&/=]*)';
 export const RE_MENTION_TEMPLATE = '(@[\\w\\d_-]+)';
 export const RE_TG_LINK = /^tg:(\/\/)?/i;
-export const RE_TME_LINK = /^(https?:\/\/)?([-a-zA-Z0-9@:%_+~#=]{1,32}\.)?t\.me(?=[:/?#]|$)/i;
+export const RE_TME_LINK = /^(https?:\/\/)?(?:([-a-zA-Z0-9@:%_+~#=]{1,32}\.)?t\.me|telegram\.(?:me|dog))(?=[:/?#]|$)/i;
 export const RE_TELEGRAM_LINK = /^(https?:\/\/)?telegram\.org\//i;
 export const TME_LINK_PREFIX = 'https://t.me/';
 export const BOT_FATHER_USERNAME = 'botfather';
@@ -332,7 +344,9 @@ export const USERNAME_PURCHASE_ERROR = 'USERNAME_PURCHASE_AVAILABLE';
 export const MESSAGE_ID_REQUIRED_ERROR = 'MESSAGE_ID_REQUIRED';
 export const PURCHASE_USERNAME = 'auction';
 export const ACCEPTABLE_USERNAME_ERRORS = new Set([USERNAME_PURCHASE_ERROR, 'USERNAME_INVALID']);
-export const TME_WEB_DOMAINS = new Set(['t.me', 'web.t.me', 'a.t.me', 'k.t.me', 'z.t.me']);
+export const TME_WEB_DOMAINS = new Set([
+  't.me', 'telegram.me', 'telegram.dog', 'web.t.me', 'a.t.me', 'k.t.me', 'z.t.me',
+]);
 export const WEB_APP_PLATFORM = 'weba';
 export const LANG_PACK = 'weba';
 

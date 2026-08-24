@@ -16,6 +16,7 @@ import type {
   ApiFakeType,
   ApiFormattedText,
   ApiInputReplyInfo,
+  ApiInputRichMessage,
   ApiInputSuggestedPostInfo,
   ApiLabeledPrice,
   ApiMediaFormat,
@@ -169,6 +170,7 @@ export interface AccountSettings {
   shouldSuggestStickers: boolean;
   shouldSuggestCustomEmoji: boolean;
   shouldUpdateStickerSetOrder: boolean;
+  lastRecordMessageMode?: 'voice' | 'video';
   hasPassword?: boolean;
   isSensitiveEnabled?: boolean;
   canChangeSensitive?: boolean;
@@ -674,8 +676,8 @@ export interface ThreadLocalState {
 
   editingId?: number;
   editingScheduledId?: number;
-  editingDraft?: ApiFormattedText;
-  editingScheduledDraft?: ApiFormattedText;
+  editingDraft?: EditingDraft;
+  editingScheduledDraft?: EditingDraft;
 
   draft?: ApiDraft;
 
@@ -685,6 +687,14 @@ export interface ThreadLocalState {
 
   typingDraftIdByRandomId?: Record<string, number>;
 }
+
+export type EditingDraft = (ApiFormattedText & {
+  richMessage?: never;
+}) | {
+  text?: never;
+  entities?: never;
+  richMessage: ApiInputRichMessage;
+};
 
 export interface Thread {
   localState: ThreadLocalState;
@@ -798,6 +808,7 @@ export type SendMessageParams = {
   lastMessageId?: number;
   text?: string;
   entities?: ApiMessageEntity[];
+  richMessage?: ApiInputRichMessage;
   replyInfo?: ApiInputReplyInfo;
   suggestedPostInfo?: ApiInputSuggestedPostInfo;
   attachment?: ApiAttachment;
@@ -824,6 +835,11 @@ export type SendMessageParams = {
   starsAmount?: number;
   isPending?: true;
   messageList?: MessageList;
+  mcpAuditContext?: {
+    correlationId?: string;
+    transport?: string;
+    abortControllerGroup?: string;
+  };
   isReaction?: true; // Reaction to the story are sent in the form of a message
   messagePriceInStars?: number;
   localMessage?: ApiMessage;
@@ -850,6 +866,7 @@ export type ForwardMessagesParams = {
   withMyScore?: boolean;
   noAuthors?: boolean;
   noCaptions?: boolean;
+  privateForwardName?: string;
   isCurrentUserPremium?: boolean;
   wasDrafted?: boolean;
   lastMessageId?: number;

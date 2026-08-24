@@ -22,13 +22,11 @@ import {
   selectCanTranslateChat,
   selectChat,
   selectChatFullInfo,
-  selectIsChatBotNotStarted,
   selectIsChatRestricted,
   selectIsChatWithSelf,
   selectIsCurrentUserFrozen,
   selectIsInSelectMode,
   selectIsRightColumnShown,
-  selectIsUserBlocked,
   selectLanguageCode,
   selectRequestedChatTranslationLanguage,
   selectRequestedChatTranslationTone,
@@ -58,7 +56,6 @@ interface OwnProps {
   chatId: string;
   threadId: ThreadId;
   messageListType: MessageListType;
-  canExpandActions: boolean;
   isForForum?: boolean;
   isMobile?: boolean;
   onTopicSearch?: NoneToVoidFunction;
@@ -68,9 +65,6 @@ interface StateProps {
   noMenu?: boolean;
   isChannel?: boolean;
   isRightColumnShown?: boolean;
-  canStartBot?: boolean;
-  canRestartBot?: boolean;
-  canUnblock?: boolean;
   canSubscribe?: boolean;
   canSearch?: boolean;
   canCall?: boolean;
@@ -84,8 +78,6 @@ interface StateProps {
   canCreateVoiceChat?: boolean;
   channelMonoforumId?: string;
   pendingJoinRequests?: number;
-  shouldJoinToSend?: boolean;
-  shouldSendJoinRequest?: boolean;
   noAnimation?: boolean;
   canTranslate?: boolean;
   isTranslating?: boolean;
@@ -104,9 +96,6 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
   noMenu,
   isMobile,
   isChannel,
-  canStartBot,
-  canRestartBot,
-  canUnblock,
   canSubscribe,
   canSearch,
   canCall,
@@ -122,9 +111,6 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
   pendingJoinRequests,
   isRightColumnShown,
   isForForum,
-  canExpandActions,
-  shouldJoinToSend,
-  shouldSendJoinRequest,
   noAnimation,
   canTranslate,
   isTranslating,
@@ -139,10 +125,7 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
   onTopicSearch,
 }) => {
   const {
-    joinChannel,
-    sendBotCommand,
     openMiddleSearch,
-    restartBot,
     requestMasterAndRequestCall,
     requestNextManagementScreen,
     showNotification,
@@ -152,7 +135,6 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
     togglePeerTranslations,
     openChatLanguageModal,
     setSettingOption,
-    unblockUser,
     setViewForumAsMessages,
     openFrozenAccountModal,
     openCocoonModal,
@@ -182,22 +164,6 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
 
   const handleHeaderMenuHide = useLastCallback(() => {
     setMenuAnchor(undefined);
-  });
-
-  const handleSubscribeClick = useLastCallback(() => {
-    joinChannel({ chatId });
-  });
-
-  const handleStartBot = useLastCallback(() => {
-    sendBotCommand({ command: '/start' });
-  });
-
-  const handleRestartBot = useLastCallback(() => {
-    restartBot({ chatId });
-  });
-
-  const handleUnblock = useLastCallback(() => {
-    unblockUser({ userId: chatId });
   });
 
   const handleTranslateClick = useLastCallback(() => {
@@ -395,56 +361,6 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
       )}
       {!isMobile && (
         <>
-          {canExpandActions && !shouldSendJoinRequest && (canSubscribe || shouldJoinToSend) && (
-            <Button
-              size="smaller"
-              ripple
-              fluid
-              onClick={handleSubscribeClick}
-            >
-              {oldLang(isChannel ? 'ProfileJoinChannel' : 'ProfileJoinGroup')}
-            </Button>
-          )}
-          {canExpandActions && shouldSendJoinRequest && (
-            <Button
-              size="smaller"
-              ripple
-              fluid
-              onClick={handleSubscribeClick}
-            >
-              {oldLang('ChannelJoinRequest')}
-            </Button>
-          )}
-          {canExpandActions && canStartBot && (
-            <Button
-              size="smaller"
-              ripple
-              fluid
-              onClick={handleStartBot}
-            >
-              {oldLang('BotStart')}
-            </Button>
-          )}
-          {canExpandActions && canRestartBot && (
-            <Button
-              size="tiny"
-              ripple
-              fluid
-              onClick={handleRestartBot}
-            >
-              {oldLang('BotRestart')}
-            </Button>
-          )}
-          {canExpandActions && canUnblock && (
-            <Button
-              size="smaller"
-              ripple
-              fluid
-              onClick={handleUnblock}
-            >
-              {oldLang('Unblock')}
-            </Button>
-          )}
           {canSearch && (
             <Button
               round
@@ -511,10 +427,8 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
           threadId={threadId}
           isOpen={isMenuOpen}
           anchor={menuAnchor}
-          withExtraActions={isMobile || !canExpandActions}
           isChannel={isChannel}
-          canStartBot={canStartBot}
-          canSubscribe={canSubscribe}
+          canSubscribe={isForForum ? canSubscribe : undefined}
           canSearch={canSearch}
           canCall={canCall}
           canMute={canMute}
@@ -529,7 +443,6 @@ const HeaderActions: FC<OwnProps & StateProps> = ({
           onJoinRequestsClick={handleJoinRequestsClick}
           withForumActions={isForForum}
           channelMonoforumId={channelMonoforumId}
-          onSubscribeChannel={handleSubscribeClick}
           onSearchClick={handleSearchClick}
           onAsMessagesClick={handleAsMessagesClick}
           onClose={handleHeaderMenuClose}
@@ -575,10 +488,6 @@ export default memo(withGlobal<OwnProps>(
 
     const isSavedDialog = getIsSavedDialog(chatId, threadId, global.currentUserId);
 
-    const isUserBlocked = isPrivate ? selectIsUserBlocked(global, chatId) : false;
-    const canRestartBot = Boolean(bot && isUserBlocked);
-    const canStartBot = !canRestartBot && Boolean(selectIsChatBotNotStarted(global, chatId));
-    const canUnblock = isUserBlocked && !bot;
     const canSubscribe = Boolean(
       (isMainThread || chat.isForum) && (isChannel || isSuperGroup) && chat.isNotJoined && !chat.isMonoforum,
     );
@@ -596,8 +505,6 @@ export default memo(withGlobal<OwnProps>(
       && (isSuperGroup || isChannel) && (canViewStatistics || getHasAdminRight(chat, 'postStories'));
     const canShowBoostModal = !canViewBoosts && (isSuperGroup || isChannel) && !chat.isMonoforum;
     const pendingJoinRequests = isMainThread ? chatFullInfo?.requestsPending : undefined;
-    const shouldJoinToSend = Boolean(chat?.isNotJoined && chat.isJoinToSend);
-    const shouldSendJoinRequest = Boolean(chat?.isNotJoined && chat.isJoinRequest);
     const noAnimation = !selectCanAnimateInterface(global);
 
     const isTranslating = Boolean(selectRequestedChatTranslationLanguage(global, chatId));
@@ -613,8 +520,6 @@ export default memo(withGlobal<OwnProps>(
       noMenu: false,
       isChannel,
       isRightColumnShown,
-      canStartBot,
-      canRestartBot,
       canSubscribe,
       canSearch,
       canCall,
@@ -627,8 +532,6 @@ export default memo(withGlobal<OwnProps>(
       canEnterVoiceChat,
       canCreateVoiceChat,
       pendingJoinRequests,
-      shouldJoinToSend,
-      shouldSendJoinRequest,
       noAnimation,
       canTranslate,
       isTranslating,
@@ -636,7 +539,6 @@ export default memo(withGlobal<OwnProps>(
       language,
       doNotTranslate,
       detectedChatLanguage: chat.detectedLanguage,
-      canUnblock,
       isAccountFrozen,
       channelMonoforumId,
       currentTone,

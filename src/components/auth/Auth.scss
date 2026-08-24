@@ -169,6 +169,31 @@
     transition: opacity 1ms;
   }
 
+  .auth-security-warning {
+    margin: 1rem 0 1.25rem;
+    padding: 1rem;
+    border: 2px solid #7c3aed;
+    border-radius: 0.75rem;
+
+    font-size: 0.875rem;
+    line-height: 1.35;
+    color: var(--color-text);
+    text-align: left;
+
+    background: rgba(124, 58, 237, 0.12);
+
+    strong {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 700;
+      color: #6d28d9;
+    }
+
+    p {
+      margin: 0.5rem 0 0;
+    }
+  }
+
   .qr-plane {
     position: absolute;
     z-index: 1;

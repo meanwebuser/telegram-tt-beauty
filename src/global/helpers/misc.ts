@@ -7,10 +7,6 @@ import type { GlobalState } from '../types';
 
 import { isUserId } from '../../util/entities/ids';
 import { partition } from '../../util/iteratees';
-import { clamp } from '../../util/math';
-import { getAccountsInfo } from '../../util/multiaccount';
-import { DEFAULT_LIMITS } from '../../limits';
-import { getGlobal } from '..';
 
 export function buildApiInputPrivacyRules(global: GlobalState, {
   visibility,
@@ -47,18 +43,4 @@ export function buildApiInputPrivacyRules(global: GlobalState, {
   };
 
   return rules;
-}
-
-export function getCurrentMaxAccountCount() {
-  const global = getGlobal();
-  const limit = global.appConfig.limits?.moreAccounts || DEFAULT_LIMITS.moreAccounts;
-  const accounts = getAccountsInfo();
-  const premiumCount = Object.values(accounts).filter((account) => account.isPremium).length;
-  // Each premium account increases the base limit by 1, up to the maximum limit.
-  const currentMaxCount = limit[0] + premiumCount;
-  return clamp(currentMaxCount, limit[0], limit[1]);
-}
-
-export function getCurrentProdAccountCount() {
-  return Object.values(getAccountsInfo()).filter((account) => !account.isTest).length;
 }

@@ -73,10 +73,12 @@ type StateProps = {
 
 type OwnProps = {
   shouldForceShowEditing?: boolean;
+  isHidden?: boolean;
   chatId: string;
   threadId: ThreadId;
   messageListType: MessageListType;
   onClear?: NoneToVoidFunction;
+  onIsOpenChange?: (isOpen: boolean) => void;
 };
 
 const CLOSE_DURATION = 350;
@@ -92,8 +94,10 @@ const ComposerEmbeddedMessage = (props: OwnProps & StateProps) => {
     editingId,
     suggestedPostInfo,
     shouldForceShowEditing,
+    isHidden,
     message,
     forwardedMessagesCount,
+    onIsOpenChange,
   } = props;
 
   const {
@@ -144,11 +148,17 @@ const ComposerEmbeddedMessage = (props: OwnProps & StateProps) => {
     if (isShowingSuggestedPost) return true;
     return false;
   })();
+  const isOpen = isShown && !isReplyToTopicStart && !isReplyToDiscussion && !isHidden;
+
+  useEffect(() => {
+    onIsOpenChange?.(isOpen);
+    return () => onIsOpenChange?.(false);
+  }, [isOpen, onIsOpenChange]);
 
   const {
     shouldRender, transitionClassNames, isClosing,
   } = useShowTransitionDeprecated(
-    isShown && !isReplyToTopicStart && !isReplyToDiscussion,
+    isOpen,
     undefined,
     !shouldAnimate,
     undefined,
@@ -207,7 +217,9 @@ const ComposerEmbeddedMessage = (props: OwnProps & StateProps) => {
     onClear?.();
   });
 
-  useEffect(() => (isShown ? captureEscKeyListener(clearEmbedded) : undefined), [isShown, clearEmbedded]);
+  useEffect(() => (isShown && !isHidden ? captureEscKeyListener(clearEmbedded) : undefined), [
+    isShown, isHidden, clearEmbedded,
+  ]);
 
   const {
     isContextMenuOpen, contextMenuAnchor, handleContextMenu,
@@ -228,7 +240,7 @@ const ComposerEmbeddedMessage = (props: OwnProps & StateProps) => {
   const handlePictogramClick = useLastCallback((e: React.MouseEvent): void => {
     e.stopPropagation();
     if ((frozenEditingId || frozenReplyInfo?.type === 'message') && canMediaBeEdited) {
-      requestMessageMediaEditor();
+      requestMessageMediaEditor({ chatId: frozenMessage.chatId, messageId: frozenMessage.id });
       return;
     }
   });

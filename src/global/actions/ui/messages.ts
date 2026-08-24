@@ -112,12 +112,12 @@ addActionHandler('markTypingDraftDone', (global, actions, payload): ActionReturn
 
 addActionHandler('setEditingDraft', (global, actions, payload): ActionReturnType => {
   const {
-    text, chatId, threadId, type,
+    draft, chatId, threadId, type,
   } = payload;
 
   const paramName = type === 'scheduled' ? 'editingScheduledDraft' : 'editingDraft';
 
-  return replaceThreadLocalStateParam(global, chatId, threadId, paramName, text);
+  return replaceThreadLocalStateParam(global, chatId, threadId, paramName, draft);
 });
 
 addActionHandler('editLastMessage', (global, actions, payload): ActionReturnType => {
@@ -141,7 +141,8 @@ addActionHandler('editLastMessage', (global, actions, payload): ActionReturnType
     return undefined;
   }
 
-  return replaceThreadLocalStateParam(global, chatId, threadId, 'editingId', lastOwnEditableMessageId);
+  actions.startEditingMessage({ messageId: lastOwnEditableMessageId, tabId });
+  return undefined;
 });
 
 addActionHandler('replyToNextMessage', (global, actions, payload): ActionReturnType => {
@@ -535,6 +536,13 @@ addActionHandler('setShouldPreventComposerAnimation', (global, actions, payload)
   }, tabId);
 });
 
+addActionHandler('setIsRichInputExpanded', (global, actions, payload): ActionReturnType => {
+  const { isRichInputExpanded, tabId = getCurrentTabId() } = payload;
+  return updateTabState(global, {
+    isRichInputExpanded,
+  }, tabId);
+});
+
 addActionHandler('openReplyMenu', (global, actions, payload): ActionReturnType => {
   const {
     fromChatId, messageId, quoteText, quoteOffset, tabId = getCurrentTabId(),
@@ -922,16 +930,6 @@ addActionHandler('closeChatLanguageModal', (global, actions, payload): ActionRet
     chatLanguageModal: undefined,
   }, tabId);
 });
-
-addActionHandler('openInstantView', (global, actions, payload): ActionReturnType => {
-  const { webPageId, tabId = getCurrentTabId() } = payload;
-
-  return updateTabState(global, {
-    instantViewModal: { webPageId },
-  }, tabId);
-});
-
-addTabStateResetterAction('closeInstantView', 'instantViewModal');
 
 addActionHandler('copySelectedMessages', (global, actions, payload): ActionReturnType => {
   const { tabId = getCurrentTabId() } = payload || {};

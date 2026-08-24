@@ -5,10 +5,10 @@ import { buildUpstreamHeaders, buildWhisperUpstreamHeaders } from './request-uti
 describe('buildUpstreamHeaders', () => {
   it('rewrites the host and origin for ordinary Telegram requests', () => {
     const headers = buildUpstreamHeaders({
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       connection: 'keep-alive',
-      origin: 'https://telegram.example.com',
-      referer: 'https://telegram.example.com/',
+      origin: 'https://tg.example.com',
+      referer: 'https://tg.example.com/',
       'user-agent': 'test-agent',
     }, 'zws2.web.telegram.org');
 
@@ -23,7 +23,7 @@ describe('buildUpstreamHeaders', () => {
 
   it('restores only the required upgrade headers for WebSocket requests', () => {
     const headers = buildUpstreamHeaders({
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       connection: 'keep-alive',
       upgrade: 'h2c',
       'sec-websocket-key': 'key',
@@ -41,9 +41,9 @@ describe('buildUpstreamHeaders', () => {
 describe('buildWhisperUpstreamHeaders', () => {
   it('replaces caller auth with the server-side Whisper key', () => {
     const headers = buildWhisperUpstreamHeaders({
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       authorization: 'Bearer caller-token',
-      origin: 'https://telegram.example.com',
+      origin: 'https://tg.example.com',
     }, 'whisper.example.com', 'server-key');
 
     expect(headers).toMatchObject({

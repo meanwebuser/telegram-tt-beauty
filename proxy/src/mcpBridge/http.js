@@ -1,15 +1,15 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   BRIDGE_TOOL_NAMES,
   createBridgeHub,
+  ensureNoTelegramSecrets,
   makeBridgeRequestEnvelope,
   parseBridgeEnvelope,
 } from './protocol.js';
 
 const MAX_BODY_BYTES = 256 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
-
 function json(res, status, body) {
   res.statusCode = status;
   res.setHeader('content-type', 'application/json; charset=utf-8');
@@ -23,6 +23,28 @@ function rpcResult(id, result) {
 
 function rpcError(id, code, message) {
   return { jsonrpc: '2.0', id, error: { code, message } };
+}
+
+function auditWriteDenied(correlationId, tool, args) {
+  const text = typeof args?.text === 'string' ? args.text : undefined;
+  const common = {
+    ts: new Date().toISOString(),
+    correlation_id: correlationId,
+    transport: 'proxy-mcp',
+    tool,
+    chat_id: typeof args?.chat_id === 'string' ? args.chat_id : undefined,
+    ...(text === undefined ? {} : {
+      text_sha256: createHash('sha256').update(text).digest('hex'),
+      text_length: text.length,
+    }),
+  };
+  console.info(`[telegram-mcp-audit] ${JSON.stringify({ ...common, event: 'mcp_call_start' })}`);
+  console.info(`[telegram-mcp-audit] ${JSON.stringify({
+    ...common,
+    event: 'mcp_call_end',
+    ok: false,
+    error_code: 'WRITE_DISABLED',
+  })}`);
 }
 
 function bearer(req) {
@@ -95,6 +117,20 @@ export function createBridgeHttpRouter({
     return pathname.startsWith('/_mcp-bridge/');
   }
 
+  function cancelPendingForConnection(connectionId) {
+    for (const [requestId, item] of pending.entries()) {
+      if (item.connectionId !== connectionId) continue;
+      pending.delete(requestId);
+      item.resolve?.({
+        version: 1,
+        kind: 'telegram.mcp.bridge.response',
+        request_id: requestId,
+        ok: false,
+        error: { code: 'MCP_DISABLED', message: 'MCP connection was disabled' },
+      });
+    }
+  }
+
   async function handle(req, res, url) {
     const route = connectionPath(url.pathname);
     if (!route) return false;
@@ -115,6 +151,7 @@ export function createBridgeHttpRouter({
           userId: body.user_id,
           bearer: body.bearer,
           browserConnectionId: body.browser_connection_id,
+          allowWrite: body.allow_write === true,
         });
         hub.enableConnection(connection.connectionId);
         return json(res, 201, { connection_id: connection.connectionId });
@@ -122,7 +159,11 @@ export function createBridgeHttpRouter({
 
       const connection = hub.getConnection(route.connectionId);
       const authorization = bearer(req);
-      if (!authorization || !hub.authorizeConnection(route.connectionId, authorization)) {
+      const lifecycleAction = route.action === 'disable' || route.action === 'revoke';
+      const authorized = lifecycleAction
+        ? authorization && hub.verifyBearer(route.connectionId, authorization)
+        : authorization && hub.authorizeConnection(route.connectionId, authorization);
+      if (!authorized) {
         return json(res, 401, { error: 'invalid or disabled bearer' });
       }
 
@@ -132,7 +173,15 @@ export function createBridgeHttpRouter({
         if (!hasBrowserBinding(req, body, connection)) {
           return json(res, 403, { error: 'browser connection binding mismatch' });
         }
-        browserTools.set(route.connectionId, Array.isArray(body.tools) ? body.tools : []);
+        const tools = Array.isArray(body.tools) ? body.tools : [];
+        try {
+          ensureNoTelegramSecrets(tools);
+        } catch {
+          return json(res, 400, { error: 'browser tool schema contains forbidden Telegram secret material' });
+        }
+        browserTools.set(route.connectionId, connection.allowWrite
+          ? tools
+          : tools.filter((tool) => tool?.function?.name !== 'send'));
         return json(res, 200, { connection_id: connection.connectionId, status: 'connected' });
       }
 
@@ -149,6 +198,14 @@ export function createBridgeHttpRouter({
         }
         next.delivered = true;
         return json(res, 200, next.envelope);
+      }
+
+      if (route.action === 'browser/status') {
+        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' });
+        if (!hasBrowserBinding(req, undefined, connection)) {
+          return json(res, 403, { error: 'browser connection binding mismatch' });
+        }
+        return json(res, 200, { status: 'enabled' });
       }
 
       if (route.action === 'browser/result') {
@@ -168,6 +225,8 @@ export function createBridgeHttpRouter({
       if (route.action === 'disable') {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' });
         hub.disableConnection(route.connectionId);
+        browserTools.delete(route.connectionId);
+        cancelPendingForConnection(route.connectionId);
         return json(res, 200, { status: 'disabled' });
       }
 
@@ -175,6 +234,7 @@ export function createBridgeHttpRouter({
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' });
         hub.revokeConnection(route.connectionId);
         browserTools.delete(route.connectionId);
+        cancelPendingForConnection(route.connectionId);
         return json(res, 200, { status: 'revoked' });
       }
 
@@ -195,7 +255,13 @@ export function createBridgeHttpRouter({
         return true;
       }
       if (body.method === 'tools/list') {
-        return json(res, 200, rpcResult(id, { tools: browserTools.get(route.connectionId) || [] }));
+        const tools = browserTools.get(route.connectionId) || [];
+        try {
+          ensureNoTelegramSecrets(tools);
+        } catch {
+          return json(res, 200, rpcError(id, -32603, 'stored browser tool schema is invalid'));
+        }
+        return json(res, 200, rpcResult(id, { tools }));
       }
       if (body.method !== 'tools/call') {
         return json(res, 200, rpcError(id, -32601, `method not found: ${body.method}`));
@@ -204,11 +270,20 @@ export function createBridgeHttpRouter({
       const name = body.params?.name;
       const args = body.params?.arguments || {};
       const tools = browserTools.get(route.connectionId) || [];
+      const requestId = randomId();
+      if (!hub.authorizeConnection(route.connectionId, authorization)) {
+        return json(res, 401, { error: 'invalid or disabled bearer' });
+      }
+      const deniedMutation = !connection.allowWrite
+        && (name === 'send' || (name === 'read' && args.mark_read === true));
+      if (deniedMutation) {
+        auditWriteDenied(requestId, name, args);
+        return json(res, 200, rpcError(id, -32003, 'MCP write permission is disabled'));
+      }
       if (!BRIDGE_TOOL_NAMES.includes(name) || (tools.length && !tools.some((tool) => tool.function?.name === name))) {
         return json(res, 200, rpcError(id, -32602, `tool not available: ${name}`));
       }
 
-      const requestId = randomId();
       const record = hub.getConnection(route.connectionId);
       const envelope = makeBridgeRequestEnvelope({
         connectionId: route.connectionId,

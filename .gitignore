@@ -1,14 +1,7 @@
 dist/build-stats.json
-graphify-out/
 node_modules
 .cache
 .env
-# Local proxy/runtime credentials stay on the deployment host; tracked
-# examples use separate *.env.example files.
-proxy/.env
-release/.env
-release/proxy.env
-release/artifacts/
 src/lib/gramjs/build/
 build-contest/
 tests/
@@ -18,4 +11,3 @@ dev/perf/screenshot*
 .DS_store
 .github/workflows/*
 !.github/workflows/package-and-publish.yml
-!.github/workflows/public-content-guard.yml

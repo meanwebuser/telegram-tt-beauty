@@ -1049,6 +1049,11 @@
   font-size: 0.875rem;
 }
 
+.pullquote, blockquote, .blockquote {
+  font-size: calc(var(--message-text-size, 1rem) - 0.125rem);
+  white-space: pre-wrap;
+}
+
 blockquote, .blockquote {
   position: relative;
 
@@ -1060,18 +1065,15 @@ blockquote, .blockquote {
   padding-inline: 0.5rem 1rem;
   border-radius: 0.25rem;
 
-  font-size: calc(var(--message-text-size, 1rem) - 0.125rem);
-  white-space: pre-wrap;
-
   background-color: var(--accent-background-color);
 
   &::before {
     content: "";
 
     position: absolute;
+    inset-inline-start: 0;
     top: 0;
     bottom: 0;
-    inset-inline-start: 0;
 
     width: 3px;
 
@@ -1084,8 +1086,8 @@ blockquote, .blockquote {
     content: map.get(icons.$icons-map, "quote");
 
     position: absolute;
-    top: 0.25rem;
     inset-inline-end: 0.25rem;
+    top: 0.25rem;
 
     font-size: 0.625rem;
     color: var(--accent-color);

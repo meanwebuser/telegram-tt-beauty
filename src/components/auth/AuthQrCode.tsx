@@ -10,6 +10,7 @@ import { disableStrict, enableStrict } from '../../lib/fasterdom/stricterdom';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import buildClassName from '../../util/buildClassName';
 import { oldSetLanguage } from '../../util/oldLangProvider';
+import { createStyledQrCode } from '../../util/qrCode/buildStyledQrCode';
 import { LOCAL_TGS_URLS } from '../common/helpers/animatedAssets';
 import { navigateBack } from './helpers/backNavigation';
 import { getSuggestedLanguage } from './helpers/getSuggestedLanguage';
@@ -23,10 +24,9 @@ import useMediaTransitionDeprecated from '../../hooks/useMediaTransitionDeprecat
 import useMultiaccountInfo from '../../hooks/useMultiaccountInfo';
 
 import AnimatedIcon from '../common/AnimatedIcon';
+import TelegramProxySettings from '../common/TelegramProxySettings';
 import Button from '../ui/Button';
 import Loading from '../ui/Loading';
-
-import blankUrl from '../../assets/blank.png';
 
 type StateProps = {
   auth: GlobalState['auth'];
@@ -37,16 +37,8 @@ type StateProps = {
 const DATA_PREFIX = 'tg://login?token=';
 const QR_SIZE = 280;
 const QR_PLANE_SIZE = 54;
+const QR_IMAGE_SIZE_RATIO = 0.4;
 const QR_CODE_MUTATION_DURATION = 50; // The library is asynchronous and we need to wait for its mutation code
-
-let qrCodeStylingPromise: Promise<typeof import('qr-code-styling')> | undefined;
-
-function ensureQrCodeStyling() {
-  if (!qrCodeStylingPromise) {
-    qrCodeStylingPromise = import('qr-code-styling');
-  }
-  return qrCodeStylingPromise;
-}
 
 const AuthCode = ({
   connectionState,
@@ -73,29 +65,10 @@ const AuthCode = ({
   const accountsInfo = useMultiaccountInfo();
   const hasActiveAccount = Object.values(accountsInfo).length > 0;
 
-  const { result: qrCode } = useAsync(async () => {
-    const QrCodeStyling = (await ensureQrCodeStyling()).default;
-    return new QrCodeStyling({
-      width: QR_SIZE,
-      height: QR_SIZE,
-      image: blankUrl,
-      margin: 10,
-      type: 'svg',
-      dotsOptions: {
-        type: 'rounded',
-      },
-      cornersSquareOptions: {
-        type: 'extra-rounded',
-      },
-      imageOptions: {
-        imageSize: 0.4,
-        margin: 8,
-      },
-      qrOptions: {
-        errorCorrectionLevel: 'M',
-      },
-    });
-  }, []);
+  const { result: qrCode } = useAsync(() => createStyledQrCode({
+    size: QR_SIZE,
+    imageSize: QR_IMAGE_SIZE_RATIO,
+  }), []);
 
   const transitionClassNames = useMediaTransitionDeprecated(isQrMounted);
 
@@ -193,12 +166,27 @@ const AuthCode = ({
           </div>
           {!isQrMounted && <div className="qr-loading"><Loading /></div>}
         </div>
+        <div className="auth-security-warning" role="alert">
+          <strong>THIS IS NOT OFFICIAL TELEGRAM WEB</strong>
+          <p>
+            If someone told you to scan this code and you do not know why—or you think this is
+            official Telegram—stop. Run, fools.
+          </p>
+          <p>
+            This is an open-source fork with free transcriptions and built-in AI by Boyk with BYOK
+            (bring your own key), plus browser MCP. Using it can expose or steal your Telegram
+            account. Browser MCP uses an external relay to reach this tab behind NAT and lives only
+            while this tab stays open. Prefer official Telegram clients unless you understand
+            exactly what you are doing.
+          </p>
+        </div>
         <h1>{lang('LoginQRTitle')}</h1>
         <ol>
           <li><span>{lang('LoginQRHelp1')}</span></li>
           <li><span>{lang('LoginQRHelp2', undefined, { withNodes: true, withMarkdown: true })}</span></li>
           <li><span>{lang('LoginQRHelp3')}</span></li>
         </ol>
+        <TelegramProxySettings />
         {isAuthReady && (
           <Button className="auth-button" isText onClick={handleReturnToAuthPhoneNumber}>
             {lang('LoginQRCancel')}

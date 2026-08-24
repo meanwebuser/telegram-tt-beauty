@@ -284,6 +284,17 @@ addActionHandler('updateContactNote', async (global, actions, payload): Promise<
   setGlobal(global);
 });
 
+addActionHandler('suggestBirthday', async (global, actions, payload): Promise<void> => {
+  const { userId, birthday } = payload;
+
+  const user = selectUser(global, userId);
+  if (!user) {
+    return;
+  }
+
+  await callApi('suggestBirthday', { user, birthday });
+});
+
 addActionHandler('deleteContact', async (global, actions, payload): Promise<void> => {
   const { userId } = payload;
 
@@ -429,14 +440,20 @@ addActionHandler('importContact', async (global, actions, payload): Promise<void
   setGlobal(global);
 });
 
-addActionHandler('reportSpam', (global, actions, payload): ActionReturnType => {
-  const { chatId } = payload;
+addActionHandler('reportSpam', async (global, actions, payload): Promise<void> => {
+  const { chatId, tabId = getCurrentTabId() } = payload;
   const peer = selectPeer(global, chatId);
   if (!peer) {
     return;
   }
 
-  void callApi('reportSpam', peer);
+  const result = await callApi('reportSpam', peer);
+  if (!result) return;
+
+  actions.showNotification({
+    message: langProvider.oldTranslate('ReportPeer.AlertSuccess'),
+    tabId,
+  });
 });
 
 addActionHandler('setEmojiStatus', async (global, actions, payload): Promise<void> => {

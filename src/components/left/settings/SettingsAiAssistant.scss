@@ -15,23 +15,3 @@
 .settings-ai-assistant-sync-actions {
   margin-top: 0.75rem;
 }
-
-.settings-ai-mcp-secret {
-  margin: 0.75rem 1rem;
-}
-
-.settings-ai-mcp-value-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-}
-
-.settings-ai-mcp-value {
-  flex: 1;
-  min-width: 0;
-  padding: 0.5rem;
-  overflow-wrap: anywhere;
-  user-select: text;
-  cursor: text;
-  white-space: pre-wrap;
-}

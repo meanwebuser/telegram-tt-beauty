@@ -1,9 +1,8 @@
 /**
  * Minimal Telegram Web proxy (client-only AI architecture).
  *
- * Goal: unblock CORS and websocket upgrades so the static Telegram WebA
- * client served from telegram.example.com (prod) and tgb.example.com (dev)
- * can talk to web.telegram.org without exposing the user's original IP.
+ * Goal: unblock CORS and websocket upgrades so a same-origin static Telegram
+ * WebA client can talk to web.telegram.org without exposing the user's IP.
  *
  * LLM execution remains in the browser. The optional MCP bridge only relays
  * short-lived, bearer-authorized tool envelopes between an external MCP
@@ -19,15 +18,18 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import { buildUpstreamHeaders, buildWhisperUpstreamHeaders } from './request-utils.js';
 import { createBridgeHttpRouter } from './mcpBridge/http.js';
 
-const PORT = Number(process.env.PORT || 7777);
+const PORT = Number(process.env.PROXY_PORT || process.env.PORT || 7777);
 const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
-const UPSTREAM_PROXY = process.env.TELEGRAM_UPSTREAM_PROXY || 'http://127.0.0.1:3128';
+const UPSTREAM_PROXY = process.env.TELEGRAM_UPSTREAM_PROXY;
 const WHISPER_UPSTREAM = process.env.WHISPER_UPSTREAM || '';
 const WHISPER_API_KEY = process.env.WHISPER_API_KEY || '';
-const upstreamAgent = new HttpsProxyAgent(UPSTREAM_PROXY, {
-  keepAlive: true,
-  headers: { 'Proxy-Connection': 'Keep-Alive' },
-});
+const MCP_UPSTREAM = process.env.MCP_UPSTREAM || '';
+const upstreamAgent = UPSTREAM_PROXY
+  ? new HttpsProxyAgent(UPSTREAM_PROXY, {
+    keepAlive: true,
+    headers: { 'Proxy-Connection': 'Keep-Alive' },
+  })
+  : undefined;
 const ALLOWED_WS_HOST_RE = /^zws\d+(?:-\d+)?\.web\.telegram\.org$/i;
 const ALLOWED_WEBSYNC_HOST_RE = /^(?:t\.me|telegram\.me)$/i;
 const ALLOWED_ORIGINS = new Set(
@@ -48,6 +50,7 @@ const ROUTES = [
   { prefix: '/proxy/telegram/',    upstream: 'https://web.telegram.org/', strip: true },
   { prefix: '/proxy/whisper-v1/',  upstream: WHISPER_UPSTREAM, strip: true, whisper: true, upstreamPathPrefix: '/v1' },
 ];
+const MCP_PUBLIC_PATH_RE = /^(?:\/mcp|\/.well-known\/oauth-[^/]+|\/oauth\/.*)$/;
 
 function allowedRoute(urlPath) {
   return ROUTES.find((r) => urlPath === r.prefix || urlPath.startsWith(r.prefix));
@@ -152,6 +155,33 @@ function pipeRequestToUpstream(req, res, route, targetHost) {
   req.pipe(fwd);
 }
 
+function pipeMcpToUpstream(req, res) {
+  if (!MCP_UPSTREAM) {
+    writeStatus(req, res, 503, 'MCP proxy is not configured');
+    return;
+  }
+  const incoming = new URL(req.url, `http://${req.headers.host}`);
+  const upstreamUrl = new URL(`${incoming.pathname}${incoming.search}`, MCP_UPSTREAM);
+  const transport = upstreamUrl.protocol === 'https:' ? https : http;
+  const headers = { ...req.headers, host: upstreamUrl.host };
+  const upstreamReq = transport.request({
+    hostname: upstreamUrl.hostname,
+    port: upstreamUrl.port || (upstreamUrl.protocol === 'https:' ? 443 : 80),
+    method: req.method,
+    path: `${upstreamUrl.pathname}${upstreamUrl.search}`,
+    headers,
+    ...(upstreamUrl.protocol === 'https:' ? { agent: upstreamAgent, servername: upstreamUrl.hostname } : {}),
+  });
+  upstreamReq.on('response', (upstreamRes) => {
+    res.statusCode = upstreamRes.statusCode || 502;
+    for (const [key, value] of Object.entries(upstreamRes.headers)) res.setHeader(key, value);
+    upstreamRes.pipe(res);
+  });
+  upstreamReq.on('error', (error) => writeStatus(req, res, 502, `MCP upstream failed: ${error.message}`));
+  req.on('error', () => upstreamReq.destroy());
+  req.pipe(upstreamReq);
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -162,6 +192,11 @@ const server = http.createServer((req, res) => {
 
   if (bridgeRouter.matches(url.pathname)) {
     void bridgeRouter.handle(req, res, url);
+    return;
+  }
+
+  if (MCP_PUBLIC_PATH_RE.test(url.pathname)) {
+    pipeMcpToUpstream(req, res);
     return;
   }
 

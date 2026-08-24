@@ -22,6 +22,7 @@ import useLangString from '../../hooks/useLangString';
 import useLastCallback from '../../hooks/useLastCallback';
 import useMultiaccountInfo from '../../hooks/useMultiaccountInfo';
 
+import TelegramProxySettings from '../common/TelegramProxySettings';
 import Button from '../ui/Button';
 import Checkbox from '../ui/Checkbox';
 import InputText from '../ui/InputText';
@@ -279,6 +280,7 @@ const AuthPhoneNumber = ({
             checked={Boolean(rememberMe)}
             onChange={handleKeepSessionChange}
           />
+          <TelegramProxySettings />
           {canSubmit && (
             isAuthReady ? (
               <Button

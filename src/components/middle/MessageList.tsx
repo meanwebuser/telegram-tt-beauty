@@ -15,7 +15,7 @@ import {
   SCROLL_MAX_DURATION,
   SERVICE_NOTIFICATIONS_USER_ID,
 } from '../../config';
-import { forceMeasure, requestMeasure, requestMutation } from '../../lib/fasterdom/fasterdom';
+import { forceMeasure, forceMutation, requestMeasure, requestMutation } from '../../lib/fasterdom/fasterdom';
 import {
   getIsSavedDialog,
   getMessageHtmlId,
@@ -74,8 +74,9 @@ import { groupMessages } from './helpers/groupMessages';
 import { requestMessageListReflow } from './helpers/messageListReflow';
 import {
   applyMessageListBottomInset,
-  getMessageListBottomReserve,
+  getEffectiveMessageListBottomReserve,
   getMessageListTopReserve,
+  isSendCollapsePhaseActive,
   syncMessageListBottomReserve,
 } from './helpers/messageListReserves';
 import { preventMessageInputBlur } from './helpers/preventMessageInputBlur';
@@ -191,6 +192,7 @@ const BOTTOM_SNAP_THRESHOLD = 7;
 const UNREAD_DIVIDER_TOP = 10;
 const SCROLL_DEBOUNCE = 200;
 const MESSAGE_ANIMATION_DURATION = 500;
+const MIN_SEND_COLLAPSE_REVEAL_SHIFT = 1;
 const SEND_FOCUS_DURATION = SCROLL_MAX_DURATION + ANIMATION_END_DELAY;
 const BOTTOM_FOCUS_MARGIN = 0.5 * REM;
 const FEW_MESSAGES_SCROLL_RISE = 4 * REM;
@@ -399,12 +401,14 @@ const MessageList = ({
     memoFirstUnreadIdRef.current = firstUnreadId;
   }, [firstUnreadId]);
 
+  const canShowSponsoredMessages = Boolean(areAdsEnabled && type === 'thread');
+
   useEffect(() => {
     const canHaveAds = isChannelChat || isBot;
-    if (areAdsEnabled && canHaveAds && isSynced && isReady && isAppConfigLoaded) {
+    if (canShowSponsoredMessages && canHaveAds && isSynced && isReady && isAppConfigLoaded) {
       loadSponsoredMessages({ peerId: chatId });
     }
-  }, [chatId, isSynced, isReady, isChannelChat, isBot, areAdsEnabled, isAppConfigLoaded]);
+  }, [chatId, isSynced, isReady, isChannelChat, isBot, canShowSponsoredMessages, isAppConfigLoaded]);
 
   // Updated only once when messages are loaded (as we want the unread divider to keep its position)
   useSyncEffect(() => {
@@ -514,6 +518,7 @@ const MessageList = ({
   const isCurrentLastMessageIncomingTypingDraft = Boolean(
     currentLastMessage?.isTypingDraft && !currentLastMessage.isOutgoing,
   );
+  const isCurrentLastMessageOwnSent = Boolean(currentLastMessage?.isOutgoing);
 
   useInterval(() => {
     if (!messageIds || !messagesById || type === 'scheduled' || isAccountFrozen || !isActive) return;
@@ -604,8 +609,10 @@ const MessageList = ({
       return;
     }
 
-    // Check if fab-trigger + threshold are entering the viewport
-    const viewportBottom = container.scrollTop + container.offsetHeight;
+    // Check if fab-trigger + threshold are entering the viewport. The bottom reserve keeps
+    // the content above the absolute footer, so the content bottom is above the scrollport bottom
+    const viewportBottom = container.scrollTop + container.offsetHeight
+      - getEffectiveMessageListBottomReserve(container);
     const triggerPosition = bottomTrigger.offsetTop;
     // Scroll is near fab-trigger + threshold. Prevents snap on sponsored message
     const shouldSnapBeActive = triggerPosition - BOTTOM_SNAP_THRESHOLD <= viewportBottom
@@ -652,7 +659,7 @@ const MessageList = ({
     }
 
     if (isLiveTailAutoScrollingRef.current) {
-      if (!isAnimatingScroll()) {
+      if (!isAnimatingScroll(container)) {
         requestMeasure(() => {
           isLiveTailAutoScrollingRef.current = false;
         });
@@ -692,30 +699,40 @@ const MessageList = ({
     const container = containerRef.current;
     if (!container || growth <= 0) return;
 
-    requestMeasure(() => {
-      if (
-        isMessageSendPendingRef.current
-        || isAnimatingScroll()
-        || isLiveTailAutoScrollingRef.current
-        || isScrollTopJustUpdatedRef.current
-        || isReplacingHistoryRef.current
-      ) {
-        return;
-      }
+    if (
+      isLiveTailAutoScrollingRef.current
+      || (
+        effectiveLiveTailStartOriginalId !== undefined
+        && isLiveTailBottomSnapSuppressedRef.current
+      )
+      || isScrollTopJustUpdatedRef.current
+      || isReplacingHistoryRef.current
+    ) {
+      return;
+    }
 
-      const { scrollTop, scrollHeight, offsetHeight } = container;
-      const wasAtBottom = (scrollHeight - scrollTop - offsetHeight) - growth <= BOTTOM_THRESHOLD;
-      if (!wasAtBottom || !isViewportNewest) return;
+    // Retarget active glides before ignoring send-pending resizes
+    if (isAnimatingScroll(container)) {
+      restartCurrentScrollAnimation();
+      return;
+    }
 
-      requestMutation(() => {
-        resetScroll(container, scrollHeight - offsetHeight);
-        scrollOffsetRef.current = offsetHeight;
-        isScrollTopJustUpdatedRef.current = true;
-        requestMeasure(() => {
-          isScrollTopJustUpdatedRef.current = false;
-        });
+    if (isMessageSendPendingRef.current) {
+      return;
+    }
+
+    const { scrollTop, scrollHeight, offsetHeight } = container;
+    const wasAtBottom = (scrollHeight - scrollTop - offsetHeight) - growth <= BOTTOM_THRESHOLD;
+    if (!wasAtBottom || !isViewportNewest) return;
+
+    forceMutation(() => {
+      resetScroll(container, scrollHeight - offsetHeight);
+      scrollOffsetRef.current = offsetHeight;
+      isScrollTopJustUpdatedRef.current = true;
+      requestMeasure(() => {
+        isScrollTopJustUpdatedRef.current = false;
       });
-    });
+    }, [container]);
   });
 
   const [getContainerHeight, prevContainerHeightRef] = useContainerHeight(containerRef, canPost && !isSelectModeActive);
@@ -870,11 +887,17 @@ const MessageList = ({
       }),
     );
 
+    const isFirstLoadWithSend = !prevMessageIds?.length && Boolean(messageIds?.length);
+    const isInSendCollapsePhase = isCurrentLastMessageOwnSent
+      && (wasMessageAdded || isFirstLoadWithSend)
+      && isSendCollapsePhaseActive(container);
+
     // Add extra height when few messages to allow scroll animation
     if (
       isViewportNewest
       && wasMessageAdded
       && !hasLiveTail
+      && !isInSendCollapsePhase
       && (messageIds && messageIds.length < MESSAGE_LIST_SLICE / 2)
       && !container.parentElement!.classList.contains(FORCE_MESSAGES_SCROLL_CLASS)
       && forceMeasure(() => (
@@ -909,7 +932,7 @@ const MessageList = ({
     requestMessageListReflow(() => {
       const { scrollTop, scrollHeight, offsetHeight } = container;
       const scrollOffset = scrollOffsetRef.current;
-      const bottomReserve = getMessageListBottomReserve(container);
+      const bottomReserve = getEffectiveMessageListBottomReserve(container);
       const messagesContainerEl = container.querySelector<HTMLElement>('.messages-container');
       const currentBottomInset = messagesContainerEl
         ? parseFloat(getComputedStyle(messagesContainerEl).paddingBottom) || 0
@@ -975,7 +998,7 @@ const MessageList = ({
       }
 
       const isResized = prevContainerHeight !== undefined && prevContainerHeight !== containerHeight;
-      if (isResized && isAnimatingScroll()) {
+      if (isResized && isAnimatingScroll(container)) {
         return undefined;
       }
 
@@ -1050,6 +1073,7 @@ const MessageList = ({
       }
 
       let newScrollTop!: number;
+      let isParkedForSendCollapse = false;
       if (liveTailElement) {
         const liveTailOffset = getOffsetToContainer(liveTailElement, container).top;
         newScrollTop = liveTailOffset + liveTailElement.offsetHeight - offsetHeight;
@@ -1059,8 +1083,15 @@ const MessageList = ({
         newScrollTop = typingDraftScrollTop;
       } else if (shouldRevealTypingDraft) {
         newScrollTop = scrollTop;
-      } else if (isAtBottom && isResized) {
+      } else if (isAtBottom && (isResized || isInSendCollapsePhase)) {
         newScrollTop = scrollHeight - offsetHeight;
+        if (isInSendCollapsePhase) {
+          isParkedForSendCollapse = true;
+          const revealShift = lastItemHeight + reserveDelta;
+          if (revealShift > MIN_SEND_COLLAPSE_REVEAL_SHIFT && !noMessageSendingAnimation) {
+            newScrollTop -= revealShift;
+          }
+        }
       } else if (anchor) {
         const newAnchorTop = anchor.getBoundingClientRect().top;
         newScrollTop = scrollTop + (newAnchorTop - (anchorTopRef.current || 0));
@@ -1075,7 +1106,7 @@ const MessageList = ({
 
       const isBottomAnchored = !liveTailElement && !shouldFocusLiveTail && typingDraftScrollTop === undefined
         && !shouldRevealTypingDraft && !anchor && !unreadDivider;
-      if (isBottomAnchored) {
+      if (isBottomAnchored || isParkedForSendCollapse) {
         newScrollTop += reserveDelta;
       }
 
@@ -1107,7 +1138,9 @@ const MessageList = ({
         });
         restartCurrentScrollAnimation();
 
-        scrollOffsetRef.current = Math.max(Math.ceil(effectiveScrollHeight - newScrollTop), offsetHeight);
+        scrollOffsetRef.current = isParkedForSendCollapse
+          ? offsetHeight
+          : Math.max(Math.ceil(effectiveScrollHeight - newScrollTop), offsetHeight);
 
         if (!memoFocusingIdRef.current) {
           isScrollTopJustUpdatedRef.current = true;
@@ -1133,6 +1166,7 @@ const MessageList = ({
     effectiveLiveTailStartOriginalId,
     isCurrentLastMessageTypingDraft,
     isCurrentLastMessageIncomingTypingDraft,
+    isCurrentLastMessageOwnSent,
     getContainerHeight,
     prevContainerHeightRef,
     noMessageSendingAnimation,
@@ -1170,7 +1204,6 @@ const MessageList = ({
   const className = buildClassName(
     'MessageList custom-scroll',
     noAvatars && 'no-avatars',
-    !canPost && 'no-composer',
     !hasFooter && 'no-footer',
     type === 'pinned' && 'type-pinned',
     withBottomShift && 'with-bottom-shift',
@@ -1236,7 +1269,7 @@ const MessageList = ({
       />
     ) : activeKey === Content.MessageList ? (
       <MessageListContent
-        canShowAds={areAdsEnabled && isChannelChat}
+        canShowAds={canShowSponsoredMessages && isChannelChat}
         chatId={chatId}
         isComments={isComments}
         isChannelChat={isChannelChat}

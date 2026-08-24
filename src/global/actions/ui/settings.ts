@@ -92,6 +92,10 @@ addCallback((global: GlobalState) => {
     }
   }
 
+  if (sharedSettings.shouldUseTelegramProxy !== oldSharedSettings.shouldUseTelegramProxy) {
+    void callApi('setShouldUseTelegramProxy', sharedSettings.shouldUseTelegramProxy);
+  }
+
   if (sharedSettings.shouldDebugExportedSenders !== oldSharedSettings.shouldDebugExportedSenders) {
     updateShouldDebugExportedSenders();
   }
