@@ -1,6 +1,7 @@
+import '../../global/actions/api/aiWorkspace';
+
 import { memo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
-import '../../global/actions/api/aiWorkspace';
 
 import type { AiWorkspaceState } from '../../global/types/aiWorkspace';
 
@@ -19,6 +20,10 @@ function AiSyncSettings({ aiWorkspace }: StateProps) {
   const { createAndEnableAiWorkspace, setAiWorkspaceEnabled } = getActions();
   const isSyncEnabled = Boolean(aiWorkspace?.isEnabled);
   const hasWorkspace = Boolean(aiWorkspace?.workspaceChatId);
+  const syncSubLabel = [
+    'Your AI history stays local by default. Turn this on to create a private Telegram forum ',
+    'workspace; its traffic follows the Telegram connection setting.',
+  ].join('');
 
   const handleSyncToggle = useLastCallback((isChecked: boolean) => {
     if (isChecked) {
@@ -37,7 +42,7 @@ function AiSyncSettings({ aiWorkspace }: StateProps) {
     <div className="ai-sync-settings">
       <Checkbox
         label="Synchronize AI history between devices"
-        subLabel="Your AI history stays local by default. Turn this on to create a private Telegram forum workspace."
+        subLabel={syncSubLabel}
         checked={isSyncEnabled}
         onCheck={handleSyncToggle}
       />

@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createBridgeHttpRouter } from './http.js';
 
@@ -9,8 +9,8 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
 });
 
-async function startRouter() {
-  const router = createBridgeHttpRouter({ randomId: () => 'request-1' });
+async function startRouter(options = {}) {
+  const router = createBridgeHttpRouter({ randomId: () => 'request-1', ...options });
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     void router.handle(req, res, url);
@@ -34,6 +34,13 @@ async function post(base, path, body, token, extraHeaders = {}) {
 }
 
 describe('mcp bridge HTTP transport', () => {
+  it('does not claim ownership of public MCP or OAuth routes', async () => {
+    const router = createBridgeHttpRouter();
+    for (const path of ['/mcp', '/.well-known/oauth-protected-resource', '/oauth/token']) {
+      expect(router.matches(path)).toBe(false);
+    }
+  });
+
   it('relays one MCP tools/call through the browser polling channel', async () => {
     const base = await startRouter();
     const token = 'Bearer browser-secret';
@@ -41,6 +48,7 @@ describe('mcp bridge HTTP transport', () => {
       user_id: 'telegram-user-1',
       bearer: token,
       browser_connection_id: 'browser-1',
+      allow_write: true,
     });
     const { connection_id: connectionId } = await createdResponse.json();
     const headers = { authorization: token, 'x-browser-connection-id': 'browser-1' };
@@ -87,5 +95,65 @@ describe('mcp bridge HTTP transport', () => {
     const call = await callResponse.json();
     expect(call.result.isError).toBe(false);
     expect(call.result.content[0].text).toContain('messages');
+  });
+
+  it('hides and rejects send when write permission is disabled', async () => {
+    const auditSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const base = await startRouter();
+    const token = 'Bearer read-only-secret';
+    const createdResponse = await post(base, '/_mcp-bridge/create', {
+      user_id: 'telegram-user-read-only',
+      bearer: token,
+      browser_connection_id: 'browser-read-only',
+    });
+    const { connection_id: connectionId } = await createdResponse.json();
+    await post(base, `/_mcp-bridge/${connectionId}/browser/connect`, {
+      browser_connection_id: 'browser-read-only',
+      tools: ['chats', 'read', 'send'].map((name) => ({
+        type: 'function',
+        function: { name, description: name, parameters: { type: 'object' } },
+      })),
+    }, token);
+
+    const listResponse = await post(base, `/_mcp-bridge/${connectionId}/mcp`, {
+      jsonrpc: '2.0', id: 3, method: 'tools/list', params: {},
+    }, token);
+    const listedTools = (await listResponse.json()).result.tools;
+    expect(listedTools.map((tool) => tool.function.name)).toEqual(['chats', 'read']);
+
+    const sendResponse = await post(base, `/_mcp-bridge/${connectionId}/mcp`, {
+      jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'send', arguments: { chat_id: 'chat-1', text: 'blocked' } },
+    }, token);
+    const sendResult = await sendResponse.json();
+    expect(sendResult.error.code).toBe(-32003);
+    expect(auditSpy).toHaveBeenCalledTimes(2);
+    expect(auditSpy.mock.calls.map(([line]) => String(line)).join('\n')).toContain('WRITE_DISABLED');
+    auditSpy.mockRestore();
+  });
+
+  it('cancels pending calls when a connection is disabled', async () => {
+    const base = await startRouter();
+    const token = 'Bearer pending-secret';
+    const createdResponse = await post(base, '/_mcp-bridge/create', {
+      user_id: 'telegram-user-pending',
+      bearer: token,
+      browser_connection_id: 'browser-pending',
+      allow_write: true,
+    });
+    const { connection_id: connectionId } = await createdResponse.json();
+    await post(base, `/_mcp-bridge/${connectionId}/browser/connect`, {
+      browser_connection_id: 'browser-pending',
+      tools: [{ type: 'function', function: { name: 'read' } }],
+    }, token);
+
+    const callPromise = post(base, `/_mcp-bridge/${connectionId}/mcp`, {
+      jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'read', arguments: { chat_id: 'chat-1' } },
+    }, token);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await post(base, `/_mcp-bridge/${connectionId}/disable`, {}, token);
+
+    const call = await (await callPromise).json();
+    expect(call.result.isError).toBe(true);
+    expect(call.result.content[0].text).toContain('MCP_DISABLED');
   });
 });

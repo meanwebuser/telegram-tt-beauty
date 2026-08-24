@@ -1,13 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import HttpStream from './HttpStream';
 import PromisedWebSockets, {
   buildTelegramWsUrl,
+  getTelegramTransportContext,
   getTelegramTransportTimeouts,
+  setTelegramProxyOverride,
   shouldUseTelegramProxy,
 } from './PromisedWebSockets';
 
 describe('Telegram transport runtime context', () => {
+  afterEach(() => {
+    setTelegramProxyOverride(undefined);
+  });
+
   it('allows slower startup through the Telegram proxy without changing direct limits', () => {
     expect(getTelegramTransportTimeouts(true)).toEqual({ ws: 15000, http: 30000 });
     expect(getTelegramTransportTimeouts(false)).toEqual({ ws: 3000, http: 10000 });
@@ -15,13 +21,13 @@ describe('Telegram transport runtime context', () => {
 
   it('builds the proxied WebSocket URL from worker location without window', () => {
     vi.stubGlobal('window', undefined);
-    vi.stubGlobal('location', { host: 'telegram.example.com', protocol: 'https:' });
+    vi.stubGlobal('location', { host: 'tg.example.com', protocol: 'https:' });
 
     try {
       const socket = new PromisedWebSockets(() => {});
 
       expect(socket.getWebSocketLink('zws2.web.telegram.org', 443)).toBe(
-        'wss://telegram.example.com/proxy/apiws/zws2.web.telegram.org/apiws',
+        'wss://tg.example.com/proxy/apiws/zws2.web.telegram.org/apiws',
       );
     } finally {
       vi.unstubAllGlobals();
@@ -33,9 +39,9 @@ describe('Telegram transport runtime context', () => {
 
     expect(getUrl('zws2.web.telegram.org', 443, false, false, {
       useProxy: true,
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       protocol: 'https:',
-    })).toBe('https://telegram.example.com/proxy/apiws/zws2.web.telegram.org/apiw1');
+    })).toBe('https://tg.example.com/proxy/apiws/zws2.web.telegram.org/apiw1');
   });
 });
 
@@ -43,16 +49,16 @@ describe('shouldUseTelegramProxy', () => {
   it('returns true when env flag is "1" regardless of host', () => {
     expect(shouldUseTelegramProxy('1', 'localhost')).toBe(true);
     expect(shouldUseTelegramProxy('1', 'my-dev.example.com')).toBe(true);
-    expect(shouldUseTelegramProxy('1', 'telegram.example.com')).toBe(true);
+    expect(shouldUseTelegramProxy('1', 'tg.example.com')).toBe(true);
   });
 
   it('returns false when env flag is "0" even for known production hosts', () => {
-    expect(shouldUseTelegramProxy('0', 'telegram.example.com')).toBe(false);
+    expect(shouldUseTelegramProxy('0', 'tg.example.com')).toBe(false);
     expect(shouldUseTelegramProxy('0', 'tgb.example.com')).toBe(false);
   });
 
-  it('returns true for telegram.example.com when env flag is empty', () => {
-    expect(shouldUseTelegramProxy('', 'telegram.example.com')).toBe(true);
+  it('returns true for tg.example.com when env flag is empty', () => {
+    expect(shouldUseTelegramProxy('', 'tg.example.com')).toBe(true);
   });
 
   it('returns true for tgb.example.com when env flag is undefined', () => {
@@ -74,8 +80,21 @@ describe('shouldUseTelegramProxy', () => {
 
   it('ignores arbitrary env-flag strings and falls through to host check', () => {
     expect(shouldUseTelegramProxy('true', 'localhost')).toBe(false);
-    expect(shouldUseTelegramProxy('yes', 'telegram.example.com')).toBe(true);
-    expect(shouldUseTelegramProxy('2', 'telegram.example.com')).toBe(true);
+    expect(shouldUseTelegramProxy('yes', 'tg.example.com')).toBe(true);
+    expect(shouldUseTelegramProxy('2', 'tg.example.com')).toBe(true);
+  });
+
+  it('lets the runtime setting override the host default and reset to automatic', () => {
+    const location = { host: 'tg.example.com', protocol: 'https:' } as const;
+
+    setTelegramProxyOverride(false);
+    expect(getTelegramTransportContext('1', location).useProxy).toBe(false);
+
+    setTelegramProxyOverride(true);
+    expect(getTelegramTransportContext('0', location).useProxy).toBe(true);
+
+    setTelegramProxyOverride(undefined);
+    expect(getTelegramTransportContext('0', location).useProxy).toBe(false);
   });
 });
 
@@ -83,9 +102,9 @@ describe('buildTelegramWsUrl — proxied', () => {
   it('routes through proxy on https page with default DC', () => {
     expect(buildTelegramWsUrl('zws1.web.telegram.org', 443, false, false, {
       useProxy: true,
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       protocol: 'https:',
-    })).toBe('wss://telegram.example.com/proxy/apiws/zws1.web.telegram.org/apiws');
+    })).toBe('wss://tg.example.com/proxy/apiws/zws1.web.telegram.org/apiws');
   });
 
   it('uses ws:// scheme on http page when proxy is enabled', () => {
@@ -99,33 +118,33 @@ describe('buildTelegramWsUrl — proxied', () => {
   it('appends _test suffix when isTestServer=true', () => {
     expect(buildTelegramWsUrl('zws2.web.telegram.org', 443, true, false, {
       useProxy: true,
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       protocol: 'https:',
-    })).toBe('wss://telegram.example.com/proxy/apiws/zws2.web.telegram.org/apiws_test');
+    })).toBe('wss://tg.example.com/proxy/apiws/zws2.web.telegram.org/apiws_test');
   });
 
   it('appends _premium suffix when isPremium=true', () => {
     expect(buildTelegramWsUrl('zws3.web.telegram.org', 443, false, true, {
       useProxy: true,
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       protocol: 'https:',
-    })).toBe('wss://telegram.example.com/proxy/apiws/zws3.web.telegram.org/apiws_premium');
+    })).toBe('wss://tg.example.com/proxy/apiws/zws3.web.telegram.org/apiws_premium');
   });
 
   it('appends _test_premium when both isTestServer and isPremium are set', () => {
     expect(buildTelegramWsUrl('zws4.web.telegram.org', 443, true, true, {
       useProxy: true,
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       protocol: 'https:',
-    })).toBe('wss://telegram.example.com/proxy/apiws/zws4.web.telegram.org/apiws_test_premium');
+    })).toBe('wss://tg.example.com/proxy/apiws/zws4.web.telegram.org/apiws_test_premium');
   });
 
   it('handles download-DC hostnames with -1 suffix (zws1-1)', () => {
     expect(buildTelegramWsUrl('zws1-1.web.telegram.org', 443, false, false, {
       useProxy: true,
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       protocol: 'https:',
-    })).toBe('wss://telegram.example.com/proxy/apiws/zws1-1.web.telegram.org/apiws');
+    })).toBe('wss://tg.example.com/proxy/apiws/zws1-1.web.telegram.org/apiws');
   });
 
   it('ignores port argument when proxied (proxy always uses 443)', () => {
@@ -134,9 +153,9 @@ describe('buildTelegramWsUrl — proxied', () => {
     // behavior so callers don't get confused.
     expect(buildTelegramWsUrl('zws1.web.telegram.org', 80, false, false, {
       useProxy: true,
-      host: 'telegram.example.com',
+      host: 'tg.example.com',
       protocol: 'https:',
-    })).toBe('wss://telegram.example.com/proxy/apiws/zws1.web.telegram.org/apiws');
+    })).toBe('wss://tg.example.com/proxy/apiws/zws1.web.telegram.org/apiws');
   });
 });
 

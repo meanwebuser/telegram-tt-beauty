@@ -15,21 +15,25 @@ export interface SharedSettings {
   languages?: ApiLanguage[];
   performance: PerformanceType;
   messageTextSize: number;
+  instantViewFontSizeAdjust: number;
   animationLevel: AnimationLevel;
   foldersPosition: FoldersPosition;
   // This can be deleted after September 2025, along with the corresponding migration
   wasAnimationLevelSetManually?: boolean;
   messageSendKeyCombo: 'enter' | 'ctrl-enter';
-  miniAppsCachedPosition?: Point;
-  miniAppsCachedSize?: Size;
+  shouldReplaceTextShortcuts: boolean;
+  browserCachedPosition?: Point;
+  browserCachedSize?: Size;
   timeFormat: TimeFormat;
   wasTimeFormatSetManually: boolean;
   isConnectionStatusMinimized: boolean;
   canDisplayChatInTitle: boolean;
   shouldForceHttpTransport?: boolean;
   shouldAllowHttpTransport?: boolean;
+  /** Explicit client choice; undefined follows the build/host default. */
+  shouldUseTelegramProxy?: boolean;
   shouldCollectDebugLogs?: boolean;
   shouldDebugExportedSenders?: boolean;
   shouldWarnAboutFiles?: boolean;
-  shouldSkipWebAppCloseConfirmation: boolean;
+  shouldSkipBrowserCloseConfirmation: boolean;
 }

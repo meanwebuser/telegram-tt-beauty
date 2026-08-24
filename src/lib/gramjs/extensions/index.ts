@@ -5,7 +5,7 @@ import HttpStream from './HttpStream';
 import Logger from './Logger';
 import MessagePacker from './MessagePacker';
 import PendingState from './PendingState';
-import PromisedWebSockets from './PromisedWebSockets';
+import PromisedWebSockets, { setTelegramProxyOverride } from './PromisedWebSockets';
 
 export {
   AsyncQueue,
@@ -16,4 +16,5 @@ export {
   MessagePacker,
   PendingState,
   PromisedWebSockets,
+  setTelegramProxyOverride,
 };

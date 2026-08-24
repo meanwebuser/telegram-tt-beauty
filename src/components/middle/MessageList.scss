@@ -2,8 +2,8 @@
 
 .MessageList {
   --message-list-top-inset: 0px;
-  --message-list-min-reserve: 4.25rem;
-  --message-list-composer-gap: 0.5rem;
+  --message-list-min-reserve: var(--composer-min-bottom-reserve);
+  --message-list-composer-gap: var(--composer-top-gap);
   --message-list-base-reserve: calc(var(--message-list-min-reserve) + var(--message-list-composer-gap));
   --message-list-bottom-inset: var(--message-list-base-reserve);
   --message-list-fade-floor: rgba(0, 0, 0, 0.24);
@@ -75,6 +75,7 @@
   }
 
   &.with-bottom-snap {
+    scroll-padding-bottom: var(--message-list-bottom-inset);
     scroll-snap-type: y proximity;
   }
 
@@ -99,7 +100,13 @@
 
     .live-tail {
       overflow-anchor: none;
-      min-height: max(0rem, calc(100cqh - var(--message-list-top-inset) - var(--message-list-bottom-inset)));
+      min-height:
+        max(
+          0rem,
+          calc(
+            100cqh - var(--message-list-top-inset) - var(--middle-header-gap) - var(--message-list-bottom-inset)
+          )
+        );
 
       .message-list-item {
         animation: live-tail-message-mount 0.2s ease-out;
@@ -126,14 +133,6 @@
     padding-top: var(--message-list-top-inset);
   }
 
-  &.no-composer {
-    margin-bottom: 0;
-
-    .last-in-list {
-      margin-bottom: 1rem;
-    }
-  }
-
   &.select-mode-active,
   &.type-pinned,
   &.saved-dialog {
@@ -150,6 +149,10 @@
   &.no-footer {
     --message-list-bottom-inset: 0px;
     --message-list-bottom-fade: 0px;
+
+    .last-in-list {
+      margin-bottom: 1rem;
+    }
   }
 
   .Message,
@@ -190,7 +193,7 @@
       transition: none !important;
     }
 
-    &.is-just-added:not(.own) {
+    &.is-just-added {
       transform: none;
     }
 
@@ -377,6 +380,10 @@
   .list-bottom-marker.with-sponsored {
     position: relative;
     top: -1rem; // Prevent overlapping with the sponsored message
+  }
+
+  &:not(.no-footer) .SponsoredMessage {
+    margin-top: 0.125rem;
   }
 
   @media (pointer: coarse) {

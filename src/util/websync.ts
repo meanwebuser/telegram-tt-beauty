@@ -5,12 +5,14 @@ import {
   APP_CODE_NAME,
   DEBUG, IS_MOCKED_CLIENT,
 } from '../config';
+import { selectSharedSettings } from '../global/selectors/sharedState';
 import { IS_TAURI } from './browser/globalEnvironment';
 import { hasStoredSession } from './sessions';
 
 const WEBSYNC_DOMAINS = [
   't.me',
   'telegram.me',
+  'telegram.dog',
 ];
 const WEBSYNC_VERSION = `${APP_VERSION} ${APP_CODE_NAME}`;
 const WEBSYNC_KEY = 'tgme_sync';
@@ -31,8 +33,13 @@ const saveSync = (authed: boolean) => {
 let lastTimeout: number | undefined;
 
 function getWebsyncUrls() {
-  const context = getTelegramTransportContext(import.meta.env.TG_USE_TELEGRAM_PROXY, globalThis.location);
-  if (!context.useProxy) {
+  const { shouldUseTelegramProxy } = selectSharedSettings(getGlobal());
+  const context = getTelegramTransportContext(
+    import.meta.env.TG_USE_TELEGRAM_PROXY,
+    globalThis.location,
+  );
+  const useProxy = shouldUseTelegramProxy ?? context.useProxy;
+  if (!useProxy) {
     return WEBSYNC_DOMAINS.map((domain) => `https://${domain}/_websync_?`);
   }
 

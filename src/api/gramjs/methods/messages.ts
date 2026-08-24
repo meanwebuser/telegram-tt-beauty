@@ -12,11 +12,11 @@ import type {
   ApiAttachment,
   ApiChat,
   ApiComposedMessageWithAI,
-  ApiError,
   ApiFormattedText,
   ApiGlobalMessageSearchType,
   ApiInputAiComposeTone,
   ApiInputReplyInfo,
+  ApiInputRichMessage,
   ApiInputSuggestedPostInfo,
   ApiMessage,
   ApiMessageEntity,
@@ -59,6 +59,7 @@ import { getMessageKey } from '../../../util/keys/messageKey';
 import { getServerTime } from '../../../util/serverTime';
 import { interpolateArray } from '../../../util/waveform';
 import { API_GENERAL_ID_LIMIT, PINNED_MESSAGES_LIMIT } from '../../../limits';
+import { consoleAuditSink, emitTelegramAudit } from '../../../mcp/telegramTools/audit';
 import {
   buildApiChatFromPreview,
   buildApiSendAsPeerId,
@@ -103,6 +104,7 @@ import {
   buildInputPollFromExisting,
   buildInputReaction,
   buildInputReplyTo,
+  buildInputRichMessage,
   buildInputStory,
   buildInputSuggestedPost,
   buildInputTextWithEntities,
@@ -360,7 +362,8 @@ export function sendMessageLocal(
   params: SendMessageParams,
 ) {
   const {
-    chat, lastMessageId, text, entities, replyInfo, suggestedPostInfo, attachment, sticker, story, gif, poll, todo,
+    chat, lastMessageId, text, entities, richMessage, replyInfo, suggestedPostInfo,
+    attachment, sticker, story, gif, poll, todo,
     contact, scheduledAt, scheduleRepeatPeriod, groupedId, sendAs, wasDrafted, isInvertedMedia, effectId, isPending,
     messagePriceInStars, dice,
   } = params;
@@ -375,6 +378,7 @@ export function sendMessageLocal(
     lastMessageId,
     text,
     entities,
+    richMessage,
     replyInfo,
     suggestedPostInfo,
     attachment,
@@ -413,11 +417,12 @@ export function sendApiMessage(
   onProgress?: ApiOnProgress,
 ) {
   const {
-    chat, text, entities, replyInfo, suggestedPostInfo, suggestedMedia,
+    chat, text, entities, richMessage, replyInfo, suggestedPostInfo, suggestedMedia,
     attachment, sticker, story, gif, poll, todo, contact, dice,
 
     isSilent, scheduledAt, scheduleRepeatPeriod, groupedId, noWebPage, sendAs, shouldUpdateStickerSetOrder,
     isInvertedMedia, effectId, webPageMediaSize, webPageUrl, messagePriceInStars,
+    mcpAuditContext,
   } = params;
 
   if (!chat) return undefined;
@@ -574,10 +579,12 @@ export function sendApiMessage(
 
     type SharedArgs = SharedRecord<SendMediaArgs, SendMessageArgs>;
 
+    const inputRichMessage = richMessage && buildInputRichMessage(richMessage);
+
     const args: SharedArgs = {
       clearDraft: true,
-      message: text || DEFAULT_PRIMITIVES.STRING,
-      entities: entities ? entities.map(buildMtpMessageEntity) : undefined,
+      message: richMessage ? DEFAULT_PRIMITIVES.STRING : text || DEFAULT_PRIMITIVES.STRING,
+      entities: richMessage ? undefined : entities ? entities.map(buildMtpMessageEntity) : undefined,
       peer: buildInputPeer(chat.id, chat.accessHash),
       randomId,
       replyTo: replyInfo && buildInputReplyTo(replyInfo),
@@ -592,29 +599,59 @@ export function sendApiMessage(
       suggestedPost: suggestedPostInfo && buildInputSuggestedPost(suggestedPostInfo),
     };
 
+    const emitMcpSendAudit = async (
+      event: 'telegram_send_request_start' | 'telegram_send_request_end',
+      ok?: boolean,
+      errorCode?: string,
+    ) => {
+      if (!mcpAuditContext?.correlationId) return;
+      try {
+        await emitTelegramAudit(consoleAuditSink, {
+          event,
+          context: {
+            correlationId: mcpAuditContext.correlationId,
+            transport: mcpAuditContext.transport || 'unknown',
+          },
+          tool: 'send',
+          chat_id: chat.id,
+          text,
+          ok,
+          error_code: errorCode,
+        });
+      } catch {
+        // Audit failures must not change Telegram send behavior.
+      }
+    };
+
     try {
+      await emitMcpSendAudit('telegram_send_request_start');
       let update;
+      const invokeOptions = {
+        shouldThrow: true,
+        shouldIgnoreUpdates: true,
+        ...(mcpAuditContext?.abortControllerGroup
+          ? { abortControllerGroup: mcpAuditContext.abortControllerGroup }
+          : {}),
+      };
       if (media) {
         update = await invokeRequest(new GramJs.messages.SendMedia({
           ...args,
           media,
-        }), {
-          shouldThrow: true,
-          shouldIgnoreUpdates: true,
-        });
+        }), invokeOptions);
       } else {
         update = await invokeRequest(new GramJs.messages.SendMessage({
           ...args,
           noWebpage: noWebPage || undefined,
-        }), {
-          shouldThrow: true,
-          shouldIgnoreUpdates: true,
-        });
+          richMessage: inputRichMessage,
+        }), invokeOptions);
       }
+
+      await emitMcpSendAudit('telegram_send_request_end', true);
 
       cancelSendingStatusTimeout();
       if (update) handleLocalMessageUpdate(localMessage, update);
     } catch (error: any) {
+      await emitMcpSendAudit('telegram_send_request_end', false, error?.errorMessage || 'SEND_REQUEST_FAILED');
       cancelSendingStatusTimeout();
 
       if (error.errorMessage === 'PRIVACY_PREMIUM_REQUIRED') {
@@ -627,6 +664,8 @@ export function sendApiMessage(
         localId: localMessage.id,
         error: error.errorMessage,
       });
+
+      if (mcpAuditContext?.correlationId) throw error;
     }
   })();
 
@@ -637,6 +676,10 @@ export async function sendMessage(
   params: SendMessageParams,
   onProgress?: ApiOnProgress,
 ) {
+  if (params.richMessage && !canSendRichMessage(params)) {
+    return undefined;
+  }
+
   const localMessage = params.localMessage || await sendMessageLocal(params);
   return localMessage ? sendApiMessage(params, localMessage, onProgress) : undefined;
 }
@@ -820,6 +863,7 @@ export async function editMessage({
   message,
   text,
   entities,
+  richMessage,
   attachment,
   noWebPage,
 }: {
@@ -827,23 +871,27 @@ export async function editMessage({
   message: ApiMessage;
   text: string;
   entities?: ApiMessageEntity[];
+  richMessage?: ApiInputRichMessage;
   attachment?: ApiAttachment;
   noWebPage?: boolean;
 }, onProgress?: ApiOnProgress) {
   const isScheduled = message.date * 1000 > getServerTime() * 1000;
 
   const media = attachment && buildUploadingMedia(attachment);
+  const inputRichMessage = richMessage && buildInputRichMessage(richMessage);
+  if (richMessage && (!inputRichMessage || media)) {
+    return;
+  }
 
   const isInvertedMedia = text && !attachment?.shouldSendAsFile ? message.isInvertedMedia : undefined;
 
   const newContent = {
     ...(media || message.content),
-    ...(text && {
-      text: {
-        text,
-        entities,
-      },
-    }),
+    text: richMessage || !text ? undefined : {
+      text,
+      entities,
+    },
+    richMessage,
   };
 
   const messageUpdate: ApiMessage = {
@@ -869,8 +917,9 @@ export async function editMessage({
     const mtpEntities = entities && entities.map(buildMtpMessageEntity);
 
     await invokeRequest(new GramJs.messages.EditMessage({
-      message: text,
-      entities: mtpEntities,
+      message: richMessage ? undefined : text,
+      entities: richMessage ? undefined : mtpEntities,
+      richMessage: inputRichMessage,
       media: mediaUpdate,
       peer: buildInputPeer(chat.id, chat.accessHash),
       id: message.id,
@@ -904,6 +953,24 @@ export async function editMessage({
       isFull: true,
     });
   }
+}
+
+function canSendRichMessage(params: SendMessageParams) {
+  return Boolean(
+    params.richMessage
+    && buildInputRichMessage(params.richMessage)
+    && !params.attachment
+    && !params.attachments?.length
+    && !params.sticker
+    && !params.story
+    && !params.gif
+    && !params.poll
+    && !params.todo
+    && !params.contact
+    && !params.dice
+    && !(params.suggestedPostInfo && params.suggestedMedia)
+    && !(params.webPageUrl && params.webPageMediaSize),
+  );
 }
 
 export async function editTodo({
@@ -1034,6 +1101,7 @@ export async function rescheduleMessage({
 async function uploadMedia(message: ApiMessage, attachment: ApiAttachment, onProgress: ApiOnProgress) {
   const {
     filename, blobUrl, mimeType, quick, voice, audio, previewBlobUrl, shouldSendAsFile, shouldSendAsSpoiler, ttlSeconds,
+    isRoundVideo,
   } = attachment;
 
   const patchedOnProgress: ApiOnProgress = (progress) => {
@@ -1075,6 +1143,7 @@ async function uploadMedia(message: ApiMessage, attachment: ApiAttachment, onPro
             w: width,
             h: height,
             supportsStreaming: true,
+            roundMessage: isRoundVideo || undefined,
           }));
         }
       }
@@ -1091,7 +1160,9 @@ async function uploadMedia(message: ApiMessage, attachment: ApiAttachment, onPro
 
     if (voice) {
       const { duration, waveform } = voice;
-      const { data: inputWaveform } = interpolateArray(waveform, INPUT_WAVEFORM_LENGTH);
+      const inputWaveform = waveform.length === INPUT_WAVEFORM_LENGTH
+        ? waveform
+        : interpolateArray(waveform, INPUT_WAVEFORM_LENGTH).data;
       attributes.push(new GramJs.DocumentAttributeAudio({
         voice: true,
         duration,
@@ -1337,12 +1408,10 @@ export async function reportMessages({
 
     return { result: buildApiReportResult(result), error: undefined };
   } catch (err: any) {
-    const errorMessage = (err as ApiError).message;
-
-    if (errorMessage === MESSAGE_ID_REQUIRED_ERROR) {
+    if (err instanceof RPCError && err.errorMessage === MESSAGE_ID_REQUIRED_ERROR) {
       return {
         result: undefined,
-        error: errorMessage,
+        error: err.errorMessage,
       };
     }
 
@@ -2074,7 +2143,7 @@ export function forwardMessagesLocal(params: ForwardMessagesParams) {
   const {
     toChat, toThreadId, messages,
     scheduledAt, scheduleRepeatPeriod, sendAs, noAuthors, noCaptions,
-    isCurrentUserPremium, wasDrafted, lastMessageId, effectId,
+    privateForwardName, isCurrentUserPremium, wasDrafted, lastMessageId, effectId,
   } = params;
 
   const messageIds = messages.map(({ id }) => id);
@@ -2089,6 +2158,7 @@ export function forwardMessagesLocal(params: ForwardMessagesParams) {
       scheduleRepeatPeriod,
       noAuthors,
       noCaptions,
+      privateForwardName,
       isCurrentUserPremium,
       lastMessageId,
       sendAs,

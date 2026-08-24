@@ -1,6 +1,7 @@
 export {
   destroy, disconnect, downloadMedia, fetchCurrentUser, repairFileReference, abortChatRequests, abortRequestGroup,
-  setForceHttpTransport, setShouldDebugExportedSenders, setAllowHttpTransport, requestChannelDifference,
+  setForceHttpTransport, setShouldDebugExportedSenders, setAllowHttpTransport, setShouldUseTelegramProxy,
+  requestChannelDifference,
   setOpenedChannelIds,
 } from './client';
 
@@ -8,6 +9,8 @@ export {
   provideAuthPhoneNumber, provideAuthCode, provideAuthPassword, provideAuthRegistration, restartAuth, restartAuthWithQr,
   restartAuthWithPasskey,
 } from './auth';
+
+export { authorizeBrowserSession } from '../../../extensions/browserSessionHandoff';
 
 export {
   broadcastLocalDbUpdateFull,

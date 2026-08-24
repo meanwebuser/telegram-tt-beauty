@@ -141,7 +141,7 @@
   .mobile & {
     // Detached card hanging under the floating search island, like the desktop dropdown.
     position: absolute;
-    top: calc(0.5rem + var(--middle-header-height) + 0.5rem);
+    top: calc(0.5rem + var(--middle-header-height) + var(--middle-header-gap));
     right: 0;
     bottom: auto;
     left: 0;
@@ -282,9 +282,9 @@
 
   position: absolute;
   right: 0;
-  bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  bottom: calc(var(--composer-bottom-gap-mobile) + env(safe-area-inset-bottom));
   left: 0;
-  transform: translateY(calc(100% + 0.5rem + env(safe-area-inset-bottom)));
+  transform: translateY(calc(100% + var(--composer-bottom-gap-mobile) + env(safe-area-inset-bottom)));
 
   display: flex;
   align-items: center;

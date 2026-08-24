@@ -12,11 +12,12 @@ import { IS_TAURI } from '../util/browser/globalEnvironment';
 import { IS_INSTALL_PROMPT_SUPPORTED, PLATFORM_ENV } from '../util/browser/windowEnvironment';
 import buildClassName from '../util/buildClassName';
 import { setupBeforeInstallPrompt } from '../util/installPrompt';
-import { ACCOUNT_SLOT, getAccountsInfo, getAccountSlotUrl } from '../util/multiaccount';
+import { ACCOUNT_SLOT, getAccountSlotUrl } from '../util/multiaccount';
 import { hasEncryptedSession } from '../util/passcode';
 import { getInitialLocationHash, parseInitialLocationHash } from '../util/routing';
 import { checkSessionLocked, hasStoredSession } from '../util/sessions';
 import { updateSizes } from '../util/windowSize';
+import { getStoredAccountRecoveryUrl } from '../extensions/accountSlotPolicy';
 
 import useTauriDrag from '../hooks/tauri/useTauriDrag';
 import useAppLayout from '../hooks/useAppLayout';
@@ -24,6 +25,7 @@ import usePrevious from '../hooks/usePrevious';
 import { useSignalEffect } from '../hooks/useSignalEffect';
 import { getIsInBackground } from '../hooks/window/useBackgroundMode';
 
+import BrowserSessionHandoff from '../extensions/BrowserSessionHandoff';
 import Auth from './auth/Auth';
 import Notifications from './common/Notifications';
 import UiLoader from './common/UiLoader';
@@ -56,7 +58,6 @@ enum AppScreens {
 const TRANSITION_RENDER_COUNT = Object.keys(AppScreens).length / 2;
 const ACTIVE_PAGE_TITLE = IS_TAURI ? PAGE_TITLE_TAURI : PAGE_TITLE;
 const INACTIVE_PAGE_TITLE = `${ACTIVE_PAGE_TITLE} ${INACTIVE_MARKER}`;
-
 const App = ({
   authState,
   isScreenLocked,
@@ -69,7 +70,6 @@ const App = ({
 }: StateProps) => {
   const { isMobile } = useAppLayout();
   const isMobileOs = PLATFORM_ENV === 'iOS' || PLATFORM_ENV === 'Android';
-
   useEffect(() => {
     if (IS_INSTALL_PROMPT_SUPPORTED) {
       setupBeforeInstallPrompt();
@@ -80,18 +80,8 @@ const App = ({
     const hash = getInitialLocationHash();
     // If there is no stored session on first slot, navigate to any other slot with stored session
     if (!hasStoredSession() && !ACCOUNT_SLOT && !hash) {
-      const accounts = getAccountsInfo();
-      Object.keys(accounts)
-        .map(Number)
-        .sort((a, b) => b - a)
-        .forEach((key) => {
-          const slot = Number(key);
-          const account = accounts[slot];
-          if (account) {
-            const url = getAccountSlotUrl(slot);
-            window.location.href = `${url}#${hash || 'login'}`;
-          }
-        });
+      const recoveryUrl = getStoredAccountRecoveryUrl(hash || 'login');
+      if (recoveryUrl) window.location.href = recoveryUrl;
     }
 
     // TODO[Passcode]: Remove when multiacc passcode is implemented
@@ -257,6 +247,7 @@ const App = ({
         {renderContent}
       </Transition>
       {activeKey === AppScreens.auth && isTestServer && <div className="test-server-badge">Test server</div>}
+      <BrowserSessionHandoff />
       <Notifications />
     </UiLoader>
   );

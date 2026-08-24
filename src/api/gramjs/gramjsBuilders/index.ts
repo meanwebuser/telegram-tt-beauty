@@ -2,6 +2,7 @@ import { Api as GramJs } from '../../../lib/gramjs';
 import { generateRandomBigInt, generateRandomBytes, readBigIntFromBuffer } from '../../../lib/gramjs/Helpers';
 
 import type {
+  ApiBirthday,
   ApiBotApp,
   ApiChatAdminRights,
   ApiChatBannedRights,
@@ -49,6 +50,8 @@ import { writeUint32LE } from '../../../util/encoding/buffer';
 import { pick } from '../../../util/iteratees';
 import { deserializeBytes } from '../helpers/misc';
 import localDb from '../localDb';
+
+export { buildInputRichMessage } from './richContent';
 
 export const DEFAULT_PRIMITIVES = {
   INT: 0,
@@ -504,7 +507,11 @@ export function buildMtpMessageEntity(entity: ApiMessageEntity): GramJs.TypeMess
     case ApiMessageEntityTypes.Pre:
       return new GramJs.MessageEntityPre({ offset, length, language: entity.language || '' });
     case ApiMessageEntityTypes.Blockquote:
-      return new GramJs.MessageEntityBlockquote({ offset, length });
+      return new GramJs.MessageEntityBlockquote({
+        collapsed: entity.canCollapse ? true : undefined,
+        offset,
+        length,
+      });
     case ApiMessageEntityTypes.TextUrl:
       return new GramJs.MessageEntityTextUrl({ offset, length, url: entity.url });
     case ApiMessageEntityTypes.Url:
@@ -563,6 +570,14 @@ export function buildInputPhoto(photo: ApiPhoto) {
     'accessHash',
     'fileReference',
   ]));
+}
+
+export function buildInputBirthday(birthday: ApiBirthday) {
+  return new GramJs.Birthday({
+    day: birthday.day,
+    month: birthday.month,
+    year: birthday.year,
+  });
 }
 
 export function buildInputContact({
@@ -687,6 +702,8 @@ export function buildSendMessageAction(action: ApiSendMessageAction) {
       return new GramJs.SendMessageTypingAction();
     case 'recordAudio':
       return new GramJs.SendMessageRecordAudioAction();
+    case 'recordRound':
+      return new GramJs.SendMessageRecordRoundAction();
     case 'chooseSticker':
       return new GramJs.SendMessageChooseStickerAction();
     case 'playingGame':

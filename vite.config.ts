@@ -20,11 +20,16 @@ const DEFAULT_BUNDLE_STATS_BASELINE_FILE = 'baseline.json';
 const BUNDLE_STATS_VISUALIZER_FILE = 'visualizer.html';
 const WORKER_BUNDLE_COLLECTOR_PLUGIN_NAME = 'telegram:collect-worker-report-bundle';
 const BUNDLE_REPORT_PLUGIN_SUFFIX = ':with-workers';
-const DEV_WARMUP_CLIENT_FILES = [
-  'index.html',
-  'src/**/*.{js,jsx,ts,tsx,css,scss}',
-  '!src/**/*.d.ts',
-  '!src/lib/gramjs/tl/**',
+const DEV_SERVER_WATCH_IGNORES = [
+  '**/dist/**',
+  '**/tauri/target/**',
+];
+const DEV_BUNDLE_WARMUP_CLIENT_FILES = [
+  'src/bundles/auth.ts',
+  'src/bundles/main.ts',
+  'src/bundles/extra.ts',
+  'src/bundles/calls.ts',
+  'src/bundles/stars.ts',
 ];
 const IMAGE_ASSET_RE = /\.(?:avif|gif|jpe?g|png|svg|webp)$/i;
 const STATIC_COPY_TARGETS: Target[] = [
@@ -77,7 +82,7 @@ export default defineConfig(({ mode }): UserConfig => {
   const defaultAppTitle = `TChat${appEnv !== 'production' ? ' Beta' : ''}`;
   const baseUrl = env.BASE_URL || PRODUCTION_URL;
   const appTitle = env.APP_TITLE || defaultAppTitle;
-  const defaultAppDescription = 'TChat — open-source messaging web client (telegram-tt-beauty fork). Source: github.com/upstream-owner/telegram-tt-beauty';
+  const defaultAppDescription = 'TChat — open-source messaging web client (telegram-tt-beauty fork). Source: github.com/example/telegram-tt-beauty';
   const appDescription = env.APP_DESCRIPTION || defaultAppDescription;
   const isProductionApp = appEnv === 'production';
   const appleIcon = isProductionApp ? 'apple-touch-icon' : 'apple-touch-icon-dev';
@@ -225,7 +230,10 @@ export default defineConfig(({ mode }): UserConfig => {
       },
       https: getHttpsConfig(httpsCertPath, httpsKeyPath),
       warmup: {
-        clientFiles: isDevelopmentMode ? DEV_WARMUP_CLIENT_FILES : [],
+        clientFiles: DEV_BUNDLE_WARMUP_CLIENT_FILES,
+      },
+      watch: {
+        ignored: DEV_SERVER_WATCH_IGNORES,
       },
     },
     build: {
@@ -234,7 +242,7 @@ export default defineConfig(({ mode }): UserConfig => {
       rolldownOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes('/src/components/ui/')) {
+            if (id.includes('/src/components/ui/') && !id.includes('/src/components/ui/textInput/')) {
               return 'shared-components';
             }
             return undefined;
@@ -299,7 +307,9 @@ function buildCsp(appEnv: string) {
   return `
   default-src 'self';
   connect-src 'self' wss://*.web.telegram.org blob: http: https: ${appEnv === 'development' ? 'wss: ipc:' : ''};
-  script-src 'self' 'wasm-unsafe-eval' https://t.me/_websync_ https://telegram.me/_websync_;
+  script-src 'self' 'wasm-unsafe-eval'
+    https://t.me/_websync_ https://telegram.me/_websync_ https://telegram.dog/_websync_;
+  worker-src 'self'${appEnv === 'development' ? ' blob:' : ''};
   style-src 'self' 'unsafe-inline';
   font-src 'self' data:;
   img-src 'self' data: blob: https://ss3.4sqi.net/img/categories_v2/;

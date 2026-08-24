@@ -45,8 +45,8 @@ import {
   updateUserFullInfo,
 } from '../../reducers';
 import {
-  activateWebAppIfOpen,
-  addWebAppToOpenList,
+  activateBrowserTabIfOpen,
+  addBrowserTabToOpenList,
   replaceInlineBotSettings,
   replaceInlineBotsIsLoading,
 } from '../../reducers/bots';
@@ -68,6 +68,7 @@ import {
   selectTabState,
   selectUser,
   selectUserFullInfo,
+  selectWebApp,
 } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 import { selectDraft } from '../../selectors/threads.ts';
@@ -592,7 +593,7 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
     return;
   }
 
-  const webViewUrl = await callApi('requestSimpleWebView', {
+  const result = await callApi('requestSimpleWebView', {
     url,
     bot,
     theme,
@@ -600,9 +601,11 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
     isFromSideMenu,
     isFromSwitchWebView,
   });
-  if (!webViewUrl) {
+  if (!result) {
     return;
   }
+
+  const { url: webViewUrl, isSameOrigin } = result;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -611,8 +614,9 @@ addActionHandler('requestSimpleWebView', async (global, actions, payload): Promi
     url: webViewUrl,
     botId,
     buttonText,
+    isSameOrigin,
   };
-  global = addWebAppToOpenList(global, newActiveApp, true, true, tabId);
+  global = addBrowserTabToOpenList(global, { type: 'webApp', webApp: newActiveApp }, true, true, tabId);
   setGlobal(global);
 });
 
@@ -667,7 +671,9 @@ addActionHandler('requestWebView', async (global, actions, payload): Promise<voi
     return;
   }
 
-  const { url: webViewUrl, queryId, isFullScreen } = result;
+  const {
+    url: webViewUrl, queryId, isFullScreen, isSameOrigin,
+  } = result;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -677,20 +683,21 @@ addActionHandler('requestWebView', async (global, actions, payload): Promise<voi
     botId,
     peerId,
     queryId,
+    isSameOrigin,
     replyInfo,
     buttonText,
   };
-  global = addWebAppToOpenList(global, newActiveApp, true, true, tabId);
+  global = addBrowserTabToOpenList(global, { type: 'webApp', webApp: newActiveApp }, true, true, tabId);
   setGlobal(global);
 
   if (isFullScreen && getIsWebAppsFullscreenSupported()) {
-    actions.changeWebAppModalState({ state: 'fullScreen', tabId });
+    actions.changeBrowserModalState({ state: 'fullScreen', tabId });
   }
 });
 
 addActionHandler('openChatInviteWebView', (global, actions, payload): ActionReturnType => {
   const {
-    botId, url, queryId, peerId, isFullscreen, isBroadcast,
+    botId, url, queryId, peerId, isFullscreen, isSameOrigin, isBroadcast,
     tabId = getCurrentTabId(),
   } = payload;
 
@@ -721,15 +728,16 @@ addActionHandler('openChatInviteWebView', (global, actions, payload): ActionRetu
     botId,
     peerId,
     queryId,
+    isSameOrigin,
     isJoinChat: true,
     isJoinChatBroadcast: isBroadcast,
     buttonText: '',
   };
-  global = addWebAppToOpenList(global, newActiveApp, true, true, tabId);
+  global = addBrowserTabToOpenList(global, { type: 'webApp', webApp: newActiveApp }, true, true, tabId);
   setGlobal(global);
 
   if (isFullscreen && getIsWebAppsFullscreenSupported()) {
-    actions.changeWebAppModalState({ state: 'fullScreen', tabId });
+    actions.changeBrowserModalState({ state: 'fullScreen', tabId });
   }
 });
 
@@ -828,7 +836,9 @@ addActionHandler('requestMainWebView', async (global, actions, payload): Promise
     return;
   }
 
-  const { url: webViewUrl, queryId, isFullscreen } = result;
+  const {
+    url: webViewUrl, queryId, isFullscreen, isSameOrigin,
+  } = result;
 
   global = getGlobal();
   const newActiveApp: WebApp = {
@@ -837,14 +847,15 @@ addActionHandler('requestMainWebView', async (global, actions, payload): Promise
     botId,
     peerId,
     queryId,
+    isSameOrigin,
     buttonText: '',
   };
-  global = addWebAppToOpenList(global, newActiveApp, true, true, tabId);
+  global = addBrowserTabToOpenList(global, { type: 'webApp', webApp: newActiveApp }, true, true, tabId);
   setGlobal(global);
   actions.bumpTopPeerRating({ category: 'botsApp', peerId: botId });
 
   if (isFullscreen && getIsWebAppsFullscreenSupported()) {
-    actions.changeWebAppModalState({ state: 'fullScreen', tabId });
+    actions.changeBrowserModalState({ state: 'fullScreen', tabId });
   }
 });
 
@@ -876,25 +887,25 @@ addActionHandler('loadPreviewMedias', async (global, actions, payload): Promise<
   }
 });
 
-addActionHandler('openWebAppsCloseConfirmationModal', (global, actions, payload): ActionReturnType => {
+addActionHandler('openBrowserCloseConfirmationModal', (global, actions, payload): ActionReturnType => {
   const {
     tabId = getCurrentTabId(),
   } = payload || {};
 
   return updateTabState(global, {
-    isWebAppsCloseConfirmationModalOpen: true,
+    isBrowserCloseConfirmationModalOpen: true,
   }, tabId);
 });
 
-addActionHandler('closeWebAppsCloseConfirmationModal', (global, actions, payload): ActionReturnType => {
+addActionHandler('closeBrowserCloseConfirmationModal', (global, actions, payload): ActionReturnType => {
   const { shouldSkipInFuture, tabId = getCurrentTabId() } = payload || {};
 
   global = updateSharedSettings(global, {
-    shouldSkipWebAppCloseConfirmation: Boolean(shouldSkipInFuture),
+    shouldSkipBrowserCloseConfirmation: Boolean(shouldSkipInFuture),
   });
 
   return updateTabState(global, {
-    isWebAppsCloseConfirmationModalOpen: undefined,
+    isBrowserCloseConfirmationModalOpen: undefined,
   }, tabId);
 });
 
@@ -972,7 +983,7 @@ addActionHandler('requestAppWebView', async (global, actions, payload): Promise<
 
   const peer = selectCurrentChat(global, tabId);
 
-  const { url, isFullscreen } = await callApi('requestAppWebView', {
+  const result = await callApi('requestAppWebView', {
     peer: peer || bot,
     app: botApp,
     startParam: startApp,
@@ -981,7 +992,9 @@ addActionHandler('requestAppWebView', async (global, actions, payload): Promise<
     theme,
   });
 
-  if (!url) return;
+  if (!result) return;
+
+  const { url, isFullscreen, isSameOrigin } = result;
 
   global = getGlobal();
 
@@ -992,19 +1005,20 @@ addActionHandler('requestAppWebView', async (global, actions, payload): Promise<
     appName: appName && bot.firstName,
     peerId,
     botId,
+    isSameOrigin,
     buttonText: '',
   };
-  global = addWebAppToOpenList(global, newActiveApp, true, true, tabId);
+  global = addBrowserTabToOpenList(global, { type: 'webApp', webApp: newActiveApp }, true, true, tabId);
   setGlobal(global);
 
   if (isFullscreen && getIsWebAppsFullscreenSupported()) {
-    actions.changeWebAppModalState({ state: 'fullScreen', tabId });
+    actions.changeBrowserModalState({ state: 'fullScreen', tabId });
   }
 });
 
 addActionHandler('prolongWebView', async (global, actions, payload): Promise<void> => {
   const {
-    botId, peerId, isSilent, replyInfo, queryId, tabId = getCurrentTabId(),
+    key, botId, peerId, isSilent, replyInfo, queryId, tabId = getCurrentTabId(),
   } = payload;
 
   const bot = selectUser(global, botId);
@@ -1024,7 +1038,7 @@ addActionHandler('prolongWebView', async (global, actions, payload): Promise<voi
   });
 
   if (!result) {
-    actions.closeActiveWebApp({ tabId });
+    actions.closeBrowserTab({ key, skipClosingConfirmation: true, tabId });
   }
 });
 
@@ -1062,11 +1076,9 @@ addActionHandler('toggleAttachBot', async (global, actions, payload): Promise<vo
 export function isWepAppOpened<T extends GlobalState>(
   global: T, webApp: Partial<WebApp>, tabId: number,
 ) {
-  const currentTabState = selectTabState(global, tabId);
-  const openedWebApps = currentTabState.webApps.openedWebApps;
   const key = getWebAppKey(webApp);
   if (!key) return false;
-  return openedWebApps[key];
+  return Boolean(selectWebApp(global, key, tabId));
 }
 
 export function checkIfOpenOrActivate<T extends GlobalState>(
@@ -1076,7 +1088,7 @@ export function checkIfOpenOrActivate<T extends GlobalState>(
   if (isWepAppOpened(global, webAppForCheck, tabId)) {
     const key = getWebAppKey(webAppForCheck);
     if (key) {
-      global = activateWebAppIfOpen(global, key, tabId);
+      global = activateBrowserTabIfOpen(global, key, tabId);
       setGlobal(global);
     }
     return true;

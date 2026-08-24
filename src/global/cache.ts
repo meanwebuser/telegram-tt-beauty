@@ -22,6 +22,7 @@ import {
   GLOBAL_STATE_CACHE_CUSTOM_EMOJI_LIMIT,
   GLOBAL_STATE_CACHE_DISABLED,
   GLOBAL_STATE_CACHE_USER_LIST_LIMIT,
+  INSTANT_VIEW_FONT_SIZE_ADJUST_DEFAULT,
   IS_SCREEN_LOCKED_CACHE_KEY,
   SAVED_FOLDER_ID,
   SHARED_STATE_CACHE_KEY,
@@ -98,8 +99,8 @@ export function initCache() {
 
   const resetCache = () => {
     isRemovingCache = true;
+    localStorage.removeItem(IS_SCREEN_LOCKED_CACHE_KEY);
     removeGlobalFromCache().finally(() => {
-      localStorage.removeItem(IS_SCREEN_LOCKED_CACHE_KEY);
       isRemovingCache = false;
       if (!isCaching) {
         return;
@@ -200,6 +201,7 @@ async function readCache(initialState: GlobalState): Promise<GlobalState> {
 export function migrateCache(cached: GlobalState, initialState: GlobalState) {
   try {
     unsafeMigrateCache(cached, initialState);
+    clearCachedDraftLocalFlags(cached);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error(err);
@@ -322,7 +324,9 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
       animationLevel: untypedCached.settings.byKey.animationLevel,
       foldersPosition: FOLDERS_POSITION_DEFAULT,
       messageSendKeyCombo: untypedCached.settings.byKey.messageSendKeyCombo,
+      shouldReplaceTextShortcuts: true,
       messageTextSize: untypedCached.settings.byKey.messageTextSize,
+      instantViewFontSizeAdjust: INSTANT_VIEW_FONT_SIZE_ADJUST_DEFAULT,
       performance: untypedCached.settings.performance,
       theme: untypedCached.settings.byKey.theme,
       timeFormat: untypedCached.settings.byKey.timeFormat,
@@ -332,10 +336,11 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
       shouldForceHttpTransport: untypedCached.settings.byKey.shouldForceHttpTransport,
       language: untypedCached.settings.byKey.language,
       languages: untypedCached.settings.languages,
-      shouldSkipWebAppCloseConfirmation: untypedCached.settings.byKey.shouldSkipWebAppCloseConfirmation,
-      miniAppsCachedPosition: untypedCached.settings.miniAppsCachedPosition,
-      miniAppsCachedSize: untypedCached.settings.miniAppsCachedSize,
+      shouldSkipBrowserCloseConfirmation: Boolean(untypedCached.settings.byKey.shouldSkipBrowserCloseConfirmation),
+      browserCachedPosition: untypedCached.settings.browserCachedPosition,
+      browserCachedSize: untypedCached.settings.browserCachedSize,
       shouldAllowHttpTransport: untypedCached.settings.byKey.shouldAllowHttpTransport,
+      shouldUseTelegramProxy: untypedCached.settings.byKey.shouldUseTelegramProxy,
       shouldCollectDebugLogs: untypedCached.settings.byKey.shouldCollectDebugLogs,
       shouldDebugExportedSenders: untypedCached.settings.byKey.shouldDebugExportedSenders,
       shouldWarnAboutFiles: untypedCached.settings.byKey.shouldWarnAboutFiles,
@@ -351,6 +356,10 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
   }
 
   const cachedSharedSettings = cached.sharedState.settings;
+  if (cachedSharedSettings.instantViewFontSizeAdjust === undefined) {
+    cachedSharedSettings.instantViewFontSizeAdjust = INSTANT_VIEW_FONT_SIZE_ADJUST_DEFAULT;
+  }
+
   if (!cachedSharedSettings.wasAnimationLevelSetManually) {
     cachedSharedSettings.animationLevel = ANIMATION_LEVEL_DEFAULT;
     cachedSharedSettings.performance = INITIAL_PERFORMANCE_STATE_MED;
@@ -368,6 +377,10 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
     cachedSharedSettings.foldersPosition = FOLDERS_POSITION_DEFAULT;
   }
 
+  if (cachedSharedSettings.shouldReplaceTextShortcuts === undefined) {
+    cachedSharedSettings.shouldReplaceTextShortcuts = true;
+  }
+
   if (!cached.appConfig) {
     cached.appConfig = initialState.appConfig;
   }
@@ -378,6 +391,14 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
 
   if (cached.appConfig.isMessagePrimaryEditedDateEnabled === undefined) {
     cached.appConfig.isMessagePrimaryEditedDateEnabled = initialState.appConfig.isMessagePrimaryEditedDateEnabled;
+  }
+
+  if (cached.appConfig.richMessageLengthLimit === undefined) {
+    cached.appConfig.richMessageLengthLimit = initialState.appConfig.richMessageLengthLimit;
+    cached.appConfig.richMessageMaxBlocks = initialState.appConfig.richMessageMaxBlocks;
+    cached.appConfig.richMessageMaxDepth = initialState.appConfig.richMessageMaxDepth;
+    cached.appConfig.richMessageMaxMedia = initialState.appConfig.richMessageMaxMedia;
+    cached.appConfig.richMessageMaxTableColumns = initialState.appConfig.richMessageMaxTableColumns;
   }
 
   if (untypedCached.sharedState?.settings?.shouldWarnAboutSvg) {
@@ -403,6 +424,17 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
   if (!cached.aiWorkspace) {
     cached.aiWorkspace = initialState.aiWorkspace;
   }
+}
+
+function clearCachedDraftLocalFlags(cached: GlobalState) {
+  Object.values(cached.messages.byChatId).forEach(({ threadsById }) => {
+    Object.values(threadsById).forEach(({ localState }) => {
+      const { draft } = localState;
+      if (!draft) return;
+
+      draft.isLocal = undefined;
+    });
+  });
 }
 
 function updateCache(force?: boolean) {

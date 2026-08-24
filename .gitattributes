@@ -16,6 +16,12 @@
 *.svg text eol=lf
 *.sh text eol=lf
 
+# Generated release assets preserve upstream formatting verbatim.
+dist/** -whitespace
+public/** -whitespace
+src/assets/font-icons/menu.svg -whitespace
+src/lib/gramjs/tl/api.d.ts -whitespace
+
 # Denote all files that are truly binary and should not be modified.
 *.gif binary
 *.ico binary

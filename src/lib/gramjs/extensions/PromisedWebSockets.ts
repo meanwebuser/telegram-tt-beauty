@@ -25,7 +25,7 @@ export function getTelegramTransportTimeouts(useProxy: boolean): { ws: number; h
 // /proxy/apiws/<dcHost>/apiws... (the proxy extracts <dcHost> and forwards
 // the rest to wss://<dcHost>/apiws...).
 const PROXIED_HOSTS = new Set([
-  'telegram.example.com',
+  'tg.example.com',
   'tgb.example.com',
 ]);
 
@@ -34,6 +34,16 @@ export type TelegramTransportContext = {
   host: string;
   protocol: string;
 };
+
+let telegramProxyOverride: boolean | undefined;
+
+/**
+ * Overrides the build/host default for the lifetime of this client worker.
+ * `undefined` restores automatic routing.
+ */
+export function setTelegramProxyOverride(value: boolean | undefined) {
+  telegramProxyOverride = value;
+}
 
 /**
  * Decides whether to route Telegram WS connections through the local proxy.
@@ -53,7 +63,7 @@ export function getTelegramTransportContext(
   location: Pick<Location, 'host' | 'protocol'>,
 ): TelegramTransportContext {
   return {
-    useProxy: shouldUseTelegramProxy(envFlag, location.host),
+    useProxy: telegramProxyOverride ?? shouldUseTelegramProxy(envFlag, location.host),
     host: location.host,
     protocol: location.protocol,
   };

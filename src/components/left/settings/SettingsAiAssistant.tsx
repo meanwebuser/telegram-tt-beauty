@@ -8,10 +8,11 @@ import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
 
-import Checkbox from '../../ui/Checkbox';
-import AiSyncSettings from '../../common/AiSyncSettings';
 import AiMcpSettings from '../../common/AiMcpSettings';
+import AiSyncSettings from '../../common/AiSyncSettings';
+import TelegramProxySettings from '../../common/TelegramProxySettings';
 import Island, { IslandTitle } from '../../gili/layout/Island';
+import Checkbox from '../../ui/Checkbox';
 import InputText from '../../ui/InputText';
 
 import './SettingsAiAssistant.scss';
@@ -135,9 +136,16 @@ const SettingsAiAssistant = ({
         <AiMcpSettings />
       </Island>
 
+      <IslandTitle dir={lang.isRtl ? 'rtl' : undefined}>Telegram connection</IslandTitle>
+      <Island>
+        <TelegramProxySettings />
+      </Island>
+
       <p className="settings-item-description" dir="auto">
         The key is stored in this browser account cache. AI actions are disabled until this is enabled.
         Sending or changing messages will require explicit confirmation in later steps.
+        See the network and locality contract for the exact difference between Telegram proxy,
+        browser MCP relay, and direct BYOK traffic.
       </p>
     </div>
   );

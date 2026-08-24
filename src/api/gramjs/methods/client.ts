@@ -81,6 +81,7 @@ const gramJsUpdateEventBuilder = { build: (update: Update) => update };
 
 const CHAT_ABORT_CONTROLLERS = new Map<string, ChatAbortController>();
 const ABORT_CONTROLLERS = new Map<string, AbortController>();
+const ABORTED_REQUEST_GROUPS = new Set<string>();
 
 let client: TelegramClient;
 let currentUserId: string | undefined;
@@ -93,7 +94,7 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
 
   const {
     userAgent, platform, sessionData, isWebmSupported, maxBufferSize, webAuthToken, dcId,
-    mockScenario, shouldForceHttpTransport, shouldAllowHttpTransport,
+    mockScenario, shouldForceHttpTransport, shouldAllowHttpTransport, shouldUseTelegramProxy,
     shouldDebugExportedSenders, langCode, isTestServerRequested, accountIds,
     hasPasskeySupport,
   } = initialArgs;
@@ -117,12 +118,13 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
       shouldDebugExportedSenders,
       shouldForceHttpTransport,
       shouldAllowHttpTransport,
+      shouldUseTelegramProxy,
       dcId,
       langPack: LANG_PACK,
       langCode,
       systemLangCode: navigator.language,
       isTestServerRequested,
-    } as any,
+    },
   );
 
   client.addEventHandler(handleGramJsUpdate, gramJsUpdateEventBuilder);
@@ -254,7 +256,7 @@ type InvokeRequestParams = {
   shouldIgnoreErrors?: boolean;
   abortControllerChatId?: string;
   abortControllerThreadId?: ThreadId;
-  abortControllerGroup?: 'call';
+  abortControllerGroup?: string;
   shouldRetryOnTimeout?: boolean;
 };
 
@@ -293,7 +295,11 @@ export async function invokeRequest<T extends GramJs.AnyRequest>(
     let controller = ABORT_CONTROLLERS.get(abortControllerGroup);
     if (!controller) {
       controller = new AbortController();
-      ABORT_CONTROLLERS.set(abortControllerGroup, controller);
+      if (ABORTED_REQUEST_GROUPS.has(abortControllerGroup)) {
+        controller.abort('Request group was revoked');
+      } else {
+        ABORT_CONTROLLERS.set(abortControllerGroup, controller);
+      }
     }
     abortSignal = controller.signal;
   }
@@ -427,6 +433,7 @@ export function abortChatRequests(params: { chatId: string; threadId?: ThreadId 
 }
 
 export function abortRequestGroup(group: string) {
+  ABORTED_REQUEST_GROUPS.add(group);
   ABORT_CONTROLLERS.get(group)?.abort();
   ABORT_CONTROLLERS.delete(group);
 }
@@ -654,6 +661,10 @@ export function setForceHttpTransport(forceHttpTransport: boolean) {
 
 export function setAllowHttpTransport(allowHttpTransport: boolean) {
   client.setAllowHttpTransport(allowHttpTransport);
+}
+
+export function setShouldUseTelegramProxy(shouldUseTelegramProxy: boolean | undefined) {
+  return client.setShouldUseTelegramProxy(shouldUseTelegramProxy);
 }
 
 export function setShouldDebugExportedSenders(value: boolean) {

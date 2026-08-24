@@ -1,6 +1,6 @@
 import type {
-  ApiChat, ApiChatFolder, ApiChatlistExportedInvite,
-  ApiChatMember, ApiError, ApiMissingInvitedUser,
+  ApiChat, ApiChatFolder, ApiChatFullInfo, ApiChatlistExportedInvite,
+  ApiChatMember, ApiDraft, ApiError, ApiMissingInvitedUser,
   ApiTopic,
   LinkContext,
 } from '../../../api/types';
@@ -573,15 +573,6 @@ addActionHandler('loadAllChats', async (global, actions, payload): Promise<void>
       }
     }
 
-    if (result?.threadInfos) {
-      result.threadInfos.forEach((threadInfo) => {
-        global = updateThreadInfo(global, threadInfo);
-      });
-    }
-
-    if (result?.threadReadStatesById) {
-      global = updateMainThreadReadStates(global, result.threadReadStatesById);
-    }
     setGlobal(global);
     global = getGlobal();
   }
@@ -883,6 +874,7 @@ addActionHandler('joinChannel', async (global, actions, payload): Promise<void> 
         queryId: result.queryId,
         peerId: chatId,
         isFullscreen: result.isFullscreen,
+        isSameOrigin: result.isSameOrigin,
         isBroadcast: isChatChannel(chat),
         tabId,
       });
@@ -1889,6 +1881,7 @@ addActionHandler('acceptChatInvite', async (global, actions, payload): Promise<v
       url: result.url,
       queryId: result.queryId,
       isFullscreen: result.isFullscreen,
+      isSameOrigin: result.isSameOrigin,
       isBroadcast,
       tabId,
     });
@@ -2133,13 +2126,13 @@ addActionHandler('updateChatDefaultBannedRights', (global, actions, payload): Ac
 
 addActionHandler('updateChatMemberBannedRights', async (global, actions, payload): Promise<void> => {
   const {
-    chatId, userId, bannedRights,
+    chatId, peerId, bannedRights,
     tabId = getCurrentTabId(),
   } = payload;
 
-  const user = selectUser(global, userId);
+  const peer = selectPeer(global, peerId);
 
-  if (!user) {
+  if (!peer) {
     return;
   }
 
@@ -2147,7 +2140,7 @@ addActionHandler('updateChatMemberBannedRights', async (global, actions, payload
 
   if (!chat) return;
 
-  const result = await callApi('updateChatMemberBannedRights', { chat, user, bannedRights });
+  const result = await callApi('updateChatMemberBannedRights', { chat, peer, bannedRights });
 
   if (!result) {
     return;
@@ -2165,22 +2158,28 @@ addActionHandler('updateChatMemberBannedRights', async (global, actions, payload
   const isBanned = Boolean(bannedRights.viewMessages);
   const isUnblocked = !Object.keys(bannedRights).length;
 
-  global = updateChatFullInfo(global, chat.id, {
-    ...(members && isBanned && {
-      members: members.filter((m) => m.userId !== userId),
-    }),
-    ...(members && !isBanned && {
-      members: members.map((m) => (
-        m.userId === userId
-          ? { ...m, bannedRights }
-          : m
-      )),
-    }),
-    ...(isUnblocked && kickedMembers && {
-      kickedMembers: kickedMembers.filter((m) => m.userId !== userId),
-    }),
-  });
+  const fullInfoUpdate: Partial<ApiChatFullInfo> = {};
+  if (members) {
+    fullInfoUpdate.members = isBanned
+      ? members.filter((m) => m.userId !== peerId)
+      : members.map((m) => (m.userId === peerId ? { ...m, bannedRights } : m));
+  }
   if (isBanned) {
+    const bannedMember: ApiChatMember = {
+      userId: peerId,
+      bannedRights,
+      kickedByUserId: global.currentUserId,
+    };
+    fullInfoUpdate.kickedMembers = [
+      ...(kickedMembers?.filter((m) => m.userId !== peerId) || []),
+      bannedMember,
+    ];
+  } else if (isUnblocked && kickedMembers) {
+    fullInfoUpdate.kickedMembers = kickedMembers.filter((m) => m.userId !== peerId);
+  }
+
+  global = updateChatFullInfo(global, chat.id, fullInfoUpdate);
+  if (isBanned && isUserId(peerId)) {
     global = updateChat(global, chat.id, { membersCount: Math.max(0, (chat.membersCount || 0) - 1) });
   }
 
@@ -2544,18 +2543,17 @@ addActionHandler('addChatMembers', async (global, actions, payload): Promise<voi
 });
 
 addActionHandler('deleteChatMember', async (global, actions, payload): Promise<void> => {
-  const { chatId, userId, tabId = getCurrentTabId() } = payload;
+  const { chatId, peerId, tabId = getCurrentTabId() } = payload;
   const chat = selectChat(global, chatId);
-  const user = selectUser(global, userId);
 
-  if (!chat || !user) {
+  if (!chat) {
     return;
   }
 
   if (isChatSuperGroup(chat) || isChatChannel(chat)) {
     actions.updateChatMemberBannedRights({
       chatId,
-      userId,
+      peerId,
       bannedRights: {
         viewMessages: true,
         sendMessages: true,
@@ -2580,6 +2578,12 @@ addActionHandler('deleteChatMember', async (global, actions, payload): Promise<v
       },
       tabId,
     });
+    return;
+  }
+
+  // Basic groups only have user members
+  const user = selectUser(global, peerId);
+  if (!user) {
     return;
   }
 
@@ -3543,6 +3547,7 @@ async function loadChats(
   shouldIgnorePagination?: boolean,
 ) {
   let global = getGlobal();
+  const globalBeforeLoad = global;
   const lastLocalServiceMessageId = selectLastServiceNotification(global)?.id;
 
   const params = !shouldIgnorePagination ? selectChatListLoadingParameters(global, listType) : {};
@@ -3607,19 +3612,31 @@ async function loadChats(
     );
   }
 
+  if (isFullDraftSync) {
+    result.threadInfos.forEach((threadInfo) => {
+      global = updateThreadInfo(global, threadInfo);
+    });
+    if (result.threadReadStatesById) {
+      global = updateMainThreadReadStates(global, result.threadReadStatesById);
+    }
+  }
+
   if (listType === 'active' || listType === 'archived') {
     const idsToUpdateDraft = isFullDraftSync ? result.chatIds : Object.keys(result.draftsById);
+
     idsToUpdateDraft.forEach((chatId) => {
       const draft = result.draftsById[chatId];
       const thread = selectThread(global, chatId, MAIN_THREAD_ID);
+      if (!isFullDraftSync && !draft && !thread) return;
 
-      if (!draft && !thread) return;
+      const initialDraft = selectDraft(globalBeforeLoad, chatId, MAIN_THREAD_ID);
+      const currentDraft = selectDraft(global, chatId, MAIN_THREAD_ID);
+      const shouldKeepLocalDraft = currentDraft?.isLocal;
+      if (shouldKeepLocalDraft || shouldKeepCurrentDraft(currentDraft, initialDraft, draft)) return;
 
-      if (!selectDraft(global, chatId, MAIN_THREAD_ID)?.isLocal) {
-        global = replaceThreadLocalStateParam(
-          global, chatId, MAIN_THREAD_ID, 'draft', draft,
-        );
-      }
+      global = replaceThreadLocalStateParam(
+        global, chatId, MAIN_THREAD_ID, 'draft', draft,
+      );
     });
   }
 
@@ -3639,10 +3656,19 @@ async function loadChats(
   setGlobal(global);
 
   return {
-    threadInfos: result.threadInfos,
-    threadReadStatesById: result.threadReadStatesById,
     messages: result.messages,
   };
+}
+
+function shouldKeepCurrentDraft(
+  currentDraft: ApiDraft | undefined,
+  initialDraft: ApiDraft | undefined,
+  loadedDraft: ApiDraft | undefined,
+) {
+  if (currentDraft === initialDraft) return false;
+  if (!currentDraft || currentDraft.isLocal) return true;
+
+  return Boolean(currentDraft.date && (!loadedDraft?.date || currentDraft.date >= loadedDraft.date));
 }
 
 export async function loadFullChat<T extends GlobalState>(

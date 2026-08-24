@@ -36,12 +36,14 @@ You are an expert in TypeScript, JavaScript, HTML, SCSS and Teact with deep expe
     - Exception: the argument `force`.
   - **Optional boolean args/props default to `undefined`.** If you need a prop that *hides* an avatar, name it `noAvatar` rather than passing `hasAvatar={false}`.
   - Allowed abbreviations only: `e` (event handler arg), `err` (catch arg), `cb` (callback). Single-letter names allowed in one-line lambdas (`users.map(u => u.name)`). Avoid all others.
-  - **Hoist static constants** to the top of the module with `UPPER_SNAKE_CASE`. Never inline magic numbers inside function bodies.
+  - **Hoist reused static constants** to the top of the module with `UPPER_SNAKE_CASE`. Never inline magic numbers (except 0 and 1) inside function bodies.
   - Prefer function declarations over function expressions (except arrow functions when you need to bind `this`).
   - Order functions top-down by call hierarchy: high-level at the top, helpers at the bottom.
   - **Cache pure function results** — if called more than once in the same scope, store the result in a variable.
   - Prefer checking required parameter before calling a function, avoid making it optional and checking at the beginning of the function.
   - **Comments**: start with a capital letter; single-sentence comments have no trailing period; multi-sentence comments end each sentence with a period; wrap code entities in backticks. Only leave comments for complex logic.
+  - **Docs & Comments as present-tense assertions**: docs and comments are direct assertions about the current behavior. Do not frame them as bug history, change history, or a contrast with a previous state. Git history is the record of what changed; docs and comments explain what **is**.
+    - Contrasting the current design against a *hypothetical alternative* ("piped over stdin rather than argv, so passwords never hit the process table") is fine — that explains current behavior. Contrasting against a *prior state of this codebase* ("this used to be ~250 lines", "no longer embeds copies", "fixes the bug where…") is not.
   - **Dead code**: do not keep unused, "just in case", or speculative library-style utilities. If an object isn't used outside its own module, do not export it.
   - **TypeScript non-null assertion**: when a value is guaranteed to exist at runtime but TS can't infer it, use `!` instead of an `if` guard.
     ```ts
@@ -91,6 +93,17 @@ You are an expert in TypeScript, JavaScript, HTML, SCSS and Teact with deep expe
   2. Fix those issues. Repeat review-fix cycle until you are sure about code quality.
   3. Present the improved result.
 
+- **Definition of done (mandatory):** Before the final answer, run the focused
+  tests for every changed behavior and the relevant lint/type check. Then run
+  `git status --short` and `git diff --check`. Do not finish with temporary
+  configs, unexplained generated output, untracked files, or unstaged source
+  changes. Required generated release artifacts, including `dist/`, are valid
+  deliverables when they are the intended build output, verified, and
+  committed. Commit the reviewed source, documentation, tests, and required
+  release artifacts in the task scope. If an older user-owned change prevents
+  a clean tree, stop and state its exact paths and blocker instead of silently
+  claiming completion.
+
 - **When deeper debugging is needed:**
   1. Outline clear, step-by-step debugging instructions in your output.
   2. Remove any temporary debug code once the issue is resolved.
@@ -101,6 +114,9 @@ You are an expert in TypeScript, JavaScript, HTML, SCSS and Teact with deep expe
 
 - **Lint errors you can't fix manually:**
   Suggest running `npx eslint --fix <filename>`.
+
+- **Verification**
+  If needed, you can utilize browser to verify behavior. Check if there's already server at `localhost:1234`. If not, run `npm run dev`. Do not perform action that modify account state (sending messages, changing settings) unless directly prompted.
 
 # Telegram Web API Guide
 
@@ -591,19 +607,3 @@ PWA: Support system sharing menu
 [iOS] Startup: Add logs and signposts
 [Refactoring] Fix @typescript-eslint/await-thenable errors
 ```
-
-# Public mirror workflow
-
-This repository is the sanitized public mirror. The canonical private source
-is `https://github.com/meanwebuser/telegram-tt-beauty-source`.
-
-- Make changes only in the private source.
-- Do not add this public repository as a working remote.
-- Do not push directly to `main`.
-- Publish only with `git-private2public scan -c ops/git-private2public-public.yaml`
-  followed by `git-private2public publish -c ops/git-private2public-public.yaml`.
-- A failed scan is a hard stop; never bypass the guard or branch protection.
-- Keep credentials, sessions, private keys, internal addresses/domains, and
-  deployment-only material out of this repository.
-
-See [PUBLIC_MIRROR.md](PUBLIC_MIRROR.md) for the complete sync procedure.

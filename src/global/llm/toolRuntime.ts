@@ -6,15 +6,17 @@
  * function-calling API and the authenticated browser `callApi` bridge.
  */
 
-import { callApi } from '../../api/gramjs';
 import type { ApiChat } from '../../api/types/chats';
-import { MAIN_THREAD_ID } from '../../api/types';
+import { ApiMediaFormat, MAIN_THREAD_ID } from '../../api/types';
+
 import { ARCHIVED_FOLDER_ID } from '../../config';
+import { callApi } from '../../api/gramjs';
 import {
   createTelegramToolRuntime,
   type TelegramToolHandlers,
   type TelegramToolResult,
 } from '../../mcp/telegramTools';
+import { createCorrelationId } from '../../mcp/telegramTools/audit';
 import { getGlobal } from '../index';
 import { selectChat } from '../selectors';
 
@@ -32,6 +34,8 @@ export interface ToolResult {
   error?: string;
   requiresConfirmation?: boolean;
   confirmationMessage?: string;
+  draftId?: string;
+  payloadHash?: string;
 }
 
 export interface OpenAiTool {
@@ -82,7 +86,10 @@ function createBrowserHandlers(): TelegramToolHandlers {
         withPinned: true,
       });
     },
-    resolveChat: (chatId) => selectChat(getGlobal(), String(chatId)),
+    resolveChat: (chatId) => {
+      const global = getGlobal();
+      return selectChat(global, String(chatId));
+    },
     fetchMessagesById: (args) => callApi('fetchMessagesById', args as {
       chat: ApiChat;
       messageIds: number[];
@@ -130,12 +137,56 @@ function createBrowserHandlers(): TelegramToolHandlers {
       chat: ApiChat;
       messageIds: number[];
     }),
-    sendMessage: (args) => callApi('sendMessage', args as {
-      chat: ApiChat;
-      text: string;
-      replyInfo?: import('../../api/types/messages').ApiInputReplyInfo;
-      isSilent?: boolean;
-    }),
+    sendMessage: async (args) => {
+      const {
+        chat, text, replyInfo, isSilent, mcpAuditContext, isActive, checkActive,
+      } = args as {
+        chat: ApiChat;
+        text: string;
+        replyInfo?: import('../../api/types/messages').ApiInputReplyInfo;
+        isSilent?: boolean;
+        mcpAuditContext?: {
+          correlationId?: string;
+          transport?: string;
+          abortControllerGroup?: string;
+        };
+        isActive?: () => boolean;
+        checkActive?: () => Promise<boolean>;
+      };
+      if (isActive && !isActive()) throw new Error('MCP connection is disabled');
+      if (checkActive && !(await checkActive())) throw new Error('MCP connection is disabled');
+      return callApi('sendMessage', {
+        chat,
+        text,
+        replyInfo,
+        isSilent,
+        mcpAuditContext,
+      });
+    },
+    editMessage: async (args) => {
+      const {
+        chat, message, text,
+      } = args as {
+        chat: ApiChat;
+        message: import('../../api/types/messages').ApiMessage;
+        text: string;
+      };
+      return callApi('editMessage', { chat, message, text });
+    },
+    downloadMedia: async (args) => {
+      const { media, maxBytes } = args as {
+        media: { source?: string };
+        maxBytes: number;
+      };
+      if (!media.source) throw new Error('Provider has no media source');
+      const result = await callApi('downloadMedia', {
+        url: media.source,
+        mediaFormat: ApiMediaFormat.Progressive,
+        start: 0,
+        end: maxBytes - 1,
+      });
+      return result;
+    },
   };
 }
 
@@ -150,7 +201,7 @@ function toToolResult(result: TelegramToolResult): ToolResult {
   if (result.ok) {
     return {
       success: true,
-      data: JSON.stringify(result.data, null, 2),
+      data: JSON.stringify(result.data, undefined, 2),
     };
   }
   return {
@@ -168,22 +219,65 @@ export async function executeToolCall(
   argumentsJson: string,
   onConfirmationRequired?: (message: string) => Promise<boolean>,
 ): Promise<ToolResult> {
-  if (toolName === 'send') {
-    const message = 'Tool "send" will send a Telegram message. Execute?';
+  let parsedArguments: Record<string, unknown> | undefined;
+  try {
+    parsedArguments = JSON.parse(argumentsJson) as Record<string, unknown>;
+  } catch {
+    // The canonical runtime returns the structured invalid-arguments result.
+  }
+  const isMutating = toolName === 'send'
+    || toolName === 'edit_message'
+    || (toolName === 'read' && parsedArguments?.mark_read === true);
+  if (isMutating) {
+    const message = toolName === 'send'
+      ? 'Tool "send" will send a Telegram message. Execute?'
+      : toolName === 'edit_message'
+        ? 'Tool "edit_message" will edit a Telegram message. Execute?'
+        : 'Tool "read" will mark Telegram messages as read. Execute?';
+    const sessionId = `internal-ai-${createCorrelationId()}`;
+    const context = {
+      transport: 'internal-ai',
+      harness: 'internal-ai',
+      actor: 'user',
+      sessionId,
+      allowWrite: true,
+    };
+    const draft = toolName === 'send' || toolName === 'edit_message'
+      ? await runtime.createMutationDraft(toolName, parsedArguments || {})
+      : undefined;
     if (!onConfirmationRequired) {
       return {
         success: false,
         error: 'Mutating tools require explicit user confirmation',
         requiresConfirmation: true,
-        confirmationMessage: message,
+        confirmationMessage: draft?.confirmation_text || message,
+        draftId: draft?.draft_id,
+        payloadHash: draft?.payload_hash,
       };
     }
-    if (!(await onConfirmationRequired(message))) {
+    const exactConfirmation = draft?.confirmation_text || message;
+    if (!(await onConfirmationRequired(exactConfirmation))) {
       return { success: false, error: 'Execution denied by user' };
     }
+    const evidence = draft
+      ? await runtime.confirmMutation(draft.draft_id, exactConfirmation, context)
+      : undefined;
+    if (draft && (!evidence || !evidence.ok)) {
+      return { success: false, error: 'Failed to persist mutation evidence' };
+    }
+    const nextArguments = draft && evidence?.ok
+      ? { ...parsedArguments, confirmation: evidence.data }
+      : parsedArguments;
+    return toToolResult(await runtime.executeToolCall(toolName, JSON.stringify(nextArguments), context));
   }
 
-  return toToolResult(await runtime.executeToolCall(toolName, argumentsJson));
+  return toToolResult(await runtime.executeToolCall(toolName, argumentsJson, {
+    transport: 'internal-ai',
+    harness: 'internal-ai',
+    actor: 'user',
+    sessionId: `internal-ai-${createCorrelationId()}`,
+    allowWrite: isMutating,
+  }));
 }
 
 export function isToolAvailable(toolName: string): boolean {
@@ -192,12 +286,12 @@ export function isToolAvailable(toolName: string): boolean {
 
 export function getToolCategory(toolName: string): ToolDefinition['category'] | undefined {
   if (!runtime.isToolAvailable(toolName)) return undefined;
-  return toolName === 'send' ? 'mutating' : 'read';
+  return toolName === 'send' || toolName === 'edit_message' ? 'mutating' : 'read';
 }
 
 export function listTools(): Array<{ name: string; description: string; category: string }> {
   return runtime.listTools().map((tool) => ({
     ...tool,
-    category: tool.name === 'send' ? 'mutating' : 'read',
+    category: tool.name === 'send' || tool.name === 'edit_message' ? 'mutating' : 'read',
   }));
 }
